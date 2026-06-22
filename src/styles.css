@@ -1329,6 +1329,19 @@ label,
   gap: 4px;
 }
 
+.shortcut-key {
+  min-width: 58px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 9px;
+  color: var(--ink);
+  background: var(--hover);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
 .terminal-note {
   padding-top: 14px;
   display: flex;

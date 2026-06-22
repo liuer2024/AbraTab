@@ -84,6 +84,13 @@ type TerminalIntegrationStatus = {
   cli_built: boolean;
 };
 
+type TerminalDependencyStatus = {
+  fzf_installed: boolean;
+  fzf_path: string | null;
+  homebrew_installed: boolean;
+  install_command: string;
+};
+
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
   { id: "font", icon: Type },
@@ -162,6 +169,16 @@ const translations = {
     terminalConfig: "配置文件",
     terminalSourceHint: "已打开的终端需要重新 source 配置或新开窗口。",
     terminalInstallGuide: "安装说明",
+    terminalFzf: "搜索依赖",
+    terminalFzfDetail: "终端内搜索依赖 fzf，Tab 展开不依赖它。",
+    terminalFzfInstalled: "已安装",
+    terminalFzfMissing: "未安装",
+    terminalInstallFzf: "安装 fzf",
+    terminalCopyInstall: "复制安装命令",
+    terminalShortcut: "搜索快捷键",
+    terminalShortcutDetail: "在 shell 中按 Ctrl+G 搜索片段并填入命令行。",
+    terminalItermHint: "iTerm2 的 Command+G 需要在 Profiles > Keys 中映射为发送 Ctrl+G。",
+    terminalCopiedInstall: "已复制安装命令。",
     language: "语言",
     languageDetail: "切换界面显示语言。",
     theme: "主题",
@@ -262,6 +279,16 @@ const translations = {
     terminalConfig: "Config",
     terminalSourceHint: "Open terminal sessions need source config or a new window.",
     terminalInstallGuide: "Install guide",
+    terminalFzf: "Search dependency",
+    terminalFzfDetail: "Terminal search uses fzf. Tab expansion does not require it.",
+    terminalFzfInstalled: "Installed",
+    terminalFzfMissing: "Missing",
+    terminalInstallFzf: "Install fzf",
+    terminalCopyInstall: "Copy install command",
+    terminalShortcut: "Search shortcut",
+    terminalShortcutDetail: "Press Ctrl+G in the shell to search snippets and fill the command line.",
+    terminalItermHint: "In iTerm2, map Command+G in Profiles > Keys to send Ctrl+G.",
+    terminalCopiedInstall: "Copied install command.",
     language: "Language",
     languageDetail: "Switch the interface language.",
     theme: "Theme",
@@ -362,6 +389,16 @@ const translations = {
     terminalConfig: "設定ファイル",
     terminalSourceHint: "開いているターミナルは source または新規ウィンドウが必要です。",
     terminalInstallGuide: "インストール手順",
+    terminalFzf: "検索依存関係",
+    terminalFzfDetail: "ターミナル検索には fzf が必要です。Tab 展開には不要です。",
+    terminalFzfInstalled: "インストール済み",
+    terminalFzfMissing: "未インストール",
+    terminalInstallFzf: "fzf をインストール",
+    terminalCopyInstall: "インストールコマンドをコピー",
+    terminalShortcut: "検索ショートカット",
+    terminalShortcutDetail: "シェルで Ctrl+G を押すとスニペットを検索してコマンドラインへ入力します。",
+    terminalItermHint: "iTerm2 では Profiles > Keys で Command+G を Ctrl+G 送信に割り当てます。",
+    terminalCopiedInstall: "インストールコマンドをコピーしました。",
     language: "言語",
     languageDetail: "表示言語を切り替えます。",
     theme: "テーマ",
@@ -412,6 +449,7 @@ function App() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [theme, setTheme] = useState<Theme>("graphite");
   const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
+  const [terminalDependency, setTerminalDependency] = useState<TerminalDependencyStatus | null>(null);
   const [terminalMessage, setTerminalMessage] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; snippet: Snippet } | null>(null);
   const tagsInputRef = useRef<HTMLInputElement>(null);
@@ -632,6 +670,8 @@ function App() {
   async function refreshTerminalStatus() {
     const rows = await invoke<TerminalIntegrationStatus[]>("terminal_integration_status");
     setTerminalStatuses(rows);
+    const dependency = await invoke<TerminalDependencyStatus>("terminal_dependency_status");
+    setTerminalDependency(dependency);
   }
 
   async function buildTerminalCli() {
@@ -652,8 +692,20 @@ function App() {
     await refreshTerminalStatus();
   }
 
+  async function installFzf() {
+    const dependency = await invoke<TerminalDependencyStatus>("install_fzf");
+    setTerminalDependency(dependency);
+    setTerminalMessage(`fzf: ${dependency.fzf_path || text.terminalFzfInstalled}`);
+  }
+
+  async function copyFzfInstallCommand() {
+    const command = terminalDependency?.install_command ?? "brew install fzf";
+    await navigator.clipboard.writeText(command);
+    setTerminalMessage(`${text.terminalCopiedInstall} ${command}`);
+  }
+
   function showTerminalGuide() {
-    setTerminalMessage(`./scripts/install-zsh-integration.sh\nsource ~/.zshrc`);
+    setTerminalMessage(`Ctrl+G: ${text.terminalShortcutDetail}\n${text.terminalItermHint}`);
   }
 
   function startWindowDrag(event: React.MouseEvent<HTMLElement>) {
@@ -1104,6 +1156,35 @@ function App() {
                     <button className="settings-action" onClick={() => void buildTerminalCli().catch(showError)}>
                       {text.terminalBuildCli}
                     </button>
+                  </SettingRow>
+
+                  <SettingRow
+                    title={text.terminalFzf}
+                    detail={
+                      terminalDependency?.fzf_path
+                        ? `${text.terminalFzfDetail} ${terminalDependency.fzf_path}`
+                        : text.terminalFzfDetail
+                    }
+                  >
+                    <div className="terminal-actions">
+                      <span className={`terminal-badge ${terminalDependency?.fzf_installed ? "ok" : ""}`}>
+                        {terminalDependency?.fzf_installed ? text.terminalFzfInstalled : text.terminalFzfMissing}
+                      </span>
+                      <button
+                        className="settings-action"
+                        onClick={() => void installFzf().catch(showError)}
+                        disabled={!terminalDependency?.homebrew_installed || terminalDependency?.fzf_installed}
+                      >
+                        {text.terminalInstallFzf}
+                      </button>
+                      <button className="settings-action muted" onClick={() => void copyFzfInstallCommand().catch(showError)}>
+                        {text.terminalCopyInstall}
+                      </button>
+                    </div>
+                  </SettingRow>
+
+                  <SettingRow title={text.terminalShortcut} detail={`${text.terminalShortcutDetail} ${text.terminalItermHint}`}>
+                    <kbd className="shortcut-key">Ctrl+G</kbd>
                   </SettingRow>
 
                   <div className="terminal-shells">

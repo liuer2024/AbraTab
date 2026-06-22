@@ -23,6 +23,14 @@ struct ShellIntegrationStatus {
     cli_built: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct TerminalDependencyStatus {
+    fzf_installed: bool,
+    fzf_path: Option<String>,
+    homebrew_installed: bool,
+    install_command: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 enum AppError {
     #[error(transparent)]
@@ -135,6 +143,60 @@ fn uninstall_shell_integration(shell: String) -> Result<ShellIntegrationStatus, 
 #[tauri::command]
 fn build_cli() -> Result<String, AppError> {
     Ok(build_cli_binary()?.display().to_string())
+}
+
+#[tauri::command]
+fn terminal_dependency_status() -> TerminalDependencyStatus {
+    dependency_status()
+}
+
+#[tauri::command]
+fn install_fzf() -> Result<TerminalDependencyStatus, AppError> {
+    if command_path("brew").is_none() {
+        return Err(anyhow::anyhow!(
+            "Homebrew is required to install fzf automatically. Run: brew install fzf"
+        )
+        .into());
+    }
+
+    let output = Command::new("sh")
+        .args(["-lc", "brew install fzf"])
+        .output()
+        .map_err(anyhow::Error::from)?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "brew install fzf failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+
+    Ok(dependency_status())
+}
+
+fn dependency_status() -> TerminalDependencyStatus {
+    let fzf_path = command_path("fzf");
+    TerminalDependencyStatus {
+        fzf_installed: fzf_path.is_some(),
+        fzf_path,
+        homebrew_installed: command_path("brew").is_some(),
+        install_command: "brew install fzf".to_string(),
+    }
+}
+
+fn command_path(name: &str) -> Option<String> {
+    let output = Command::new("sh")
+        .args(["-lc", &format!("command -v {name}")])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!path.is_empty()).then_some(path)
 }
 
 fn build_cli_binary() -> anyhow::Result<PathBuf> {
@@ -312,9 +374,11 @@ pub fn run() {
             copy_snippet,
             database_path,
             terminal_integration_status,
+            terminal_dependency_status,
             install_shell_integration,
             uninstall_shell_integration,
-            build_cli
+            build_cli,
+            install_fzf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
