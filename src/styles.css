@@ -1255,18 +1255,6 @@ label,
   background: var(--selected);
 }
 
-.theme-picker {
-  width: 236px;
-  height: auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.theme-picker button {
-  min-width: 66px;
-  height: 28px;
-}
-
 .settings-action {
   min-height: 28px;
   border: 0;

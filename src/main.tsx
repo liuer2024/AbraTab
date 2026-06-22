@@ -1025,13 +1025,17 @@ function App() {
                     </div>
                   </SettingRow>
                   <SettingRow title={text.theme} detail={text.themeDetail}>
-                    <div className="segmented theme-picker">
+                    <select
+                      className="settings-select"
+                      value={theme}
+                      onChange={(event) => setTheme(event.target.value as Theme)}
+                    >
                       {themeOptions.map((name) => (
-                        <button key={name} className={theme === name ? "selected" : ""} onClick={() => setTheme(name)}>
+                        <option key={name} value={name}>
                           {text[name]}
-                        </button>
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </SettingRow>
                   <SettingRow title={text.accentColor} detail={text.accentDetail}>
                     <div className="swatches">
