@@ -33,6 +33,9 @@ cargo run --bin abratab-cli -- expand dlog
 
 ## zsh Tab expansion
 
+Recommended: open AbraTab Settings -> Terminal, then use Register for zsh,
+bash, or fish.
+
 Install the zsh integration:
 
 ```bash

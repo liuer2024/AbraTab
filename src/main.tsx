@@ -70,15 +70,24 @@ const blankForm: FormState = {
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
-type SettingsTab = "appearance" | "font" | "window" | "about";
+type SettingsTab = "appearance" | "font" | "window" | "terminal" | "about";
 type Locale = "zh" | "en" | "ja";
 type Theme = "graphite" | "notion" | "paper" | "mint" | "dusk" | "midnight";
 type LibraryView = "all" | "favorites" | "trash";
+
+type TerminalIntegrationStatus = {
+  shell: "zsh" | "bash" | "fish";
+  config_path: string;
+  registered: boolean;
+  cli_path: string;
+  cli_built: boolean;
+};
 
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
   { id: "font", icon: Type },
   { id: "window", icon: Monitor },
+  { id: "terminal", icon: TerminalSquare },
   { id: "about", icon: Info },
 ];
 
@@ -128,14 +137,26 @@ const translations = {
       appearance: "外观",
       font: "字体",
       window: "窗口",
+      terminal: "终端",
       about: "关于",
     },
     subtitles: {
       appearance: "主题、语言、强调色和密度。",
       font: "字体和编辑器阅读体验。",
       window: "窗口行为和标题栏。",
+      terminal: "注册 shell 集成和快捷词展开。",
       about: "版本和本地存储信息。",
     },
+    terminalCli: "命令行工具",
+    terminalCliDetail: "Tab 展开依赖本地 abratab-cli。",
+    terminalBuildCli: "构建/更新 CLI",
+    terminalRegistered: "已注册",
+    terminalNotRegistered: "未注册",
+    terminalRegister: "注册",
+    terminalUnregister: "取消注册",
+    terminalConfig: "配置文件",
+    terminalSourceHint: "已打开的终端需要重新 source 配置或新开窗口。",
+    terminalInstallGuide: "安装说明",
     language: "语言",
     languageDetail: "切换界面显示语言。",
     theme: "主题",
@@ -212,14 +233,26 @@ const translations = {
       appearance: "Appearance",
       font: "Font",
       window: "Window",
+      terminal: "Terminal",
       about: "About",
     },
     subtitles: {
       appearance: "Theme, language, accent, and density.",
       font: "Typeface and editor reading comfort.",
       window: "Window behavior and chrome.",
+      terminal: "Register shell integrations and shortcut expansion.",
       about: "Version and local storage details.",
     },
+    terminalCli: "CLI",
+    terminalCliDetail: "Tab expansion depends on the local abratab-cli binary.",
+    terminalBuildCli: "Build / update CLI",
+    terminalRegistered: "Registered",
+    terminalNotRegistered: "Not registered",
+    terminalRegister: "Register",
+    terminalUnregister: "Unregister",
+    terminalConfig: "Config",
+    terminalSourceHint: "Open terminal sessions need source config or a new window.",
+    terminalInstallGuide: "Install guide",
     language: "Language",
     languageDetail: "Switch the interface language.",
     theme: "Theme",
@@ -296,14 +329,26 @@ const translations = {
       appearance: "外観",
       font: "フォント",
       window: "ウィンドウ",
+      terminal: "ターミナル",
       about: "情報",
     },
     subtitles: {
       appearance: "テーマ、言語、アクセント、表示密度。",
       font: "書体とエディタの読みやすさ。",
       window: "ウィンドウ動作とタイトルバー。",
+      terminal: "シェル連携とショートカット展開を登録します。",
       about: "バージョンとローカル保存情報。",
     },
+    terminalCli: "CLI",
+    terminalCliDetail: "Tab 展開にはローカルの abratab-cli が必要です。",
+    terminalBuildCli: "CLI をビルド/更新",
+    terminalRegistered: "登録済み",
+    terminalNotRegistered: "未登録",
+    terminalRegister: "登録",
+    terminalUnregister: "登録解除",
+    terminalConfig: "設定ファイル",
+    terminalSourceHint: "開いているターミナルは source または新規ウィンドウが必要です。",
+    terminalInstallGuide: "インストール手順",
     language: "言語",
     languageDetail: "表示言語を切り替えます。",
     theme: "テーマ",
@@ -353,6 +398,8 @@ function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [locale, setLocale] = useState<Locale>("zh");
   const [theme, setTheme] = useState<Theme>("graphite");
+  const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
+  const [terminalMessage, setTerminalMessage] = useState("");
 
   const selected = snippets.find((snippet) => snippet.id === selectedId) ?? null;
   const liveSnippets = useMemo(() => snippets.filter((snippet) => !snippet.deleted_at), [snippets]);
@@ -401,6 +448,12 @@ function App() {
     void refresh();
     invoke<string>("database_path").then(setDbPath).catch(showError);
   }, []);
+
+  useEffect(() => {
+    if (settingsOpen && settingsTab === "terminal") {
+      void refreshTerminalStatus();
+    }
+  }, [settingsOpen, settingsTab]);
 
   async function refresh(nextQuery = query) {
     const rows = await invoke<Snippet[]>("list_snippets", {
@@ -531,6 +584,33 @@ function App() {
 
   function showError(error: unknown) {
     setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  async function refreshTerminalStatus() {
+    const rows = await invoke<TerminalIntegrationStatus[]>("terminal_integration_status");
+    setTerminalStatuses(rows);
+  }
+
+  async function buildTerminalCli() {
+    const path = await invoke<string>("build_cli");
+    setTerminalMessage(`${text.terminalCli}: ${path}`);
+    await refreshTerminalStatus();
+  }
+
+  async function installShell(shell: TerminalIntegrationStatus["shell"]) {
+    await invoke("install_shell_integration", { shell });
+    setTerminalMessage(`${shell}: ${text.terminalRegistered}. ${text.terminalSourceHint}`);
+    await refreshTerminalStatus();
+  }
+
+  async function uninstallShell(shell: TerminalIntegrationStatus["shell"]) {
+    await invoke("uninstall_shell_integration", { shell });
+    setTerminalMessage(`${shell}: ${text.terminalNotRegistered}`);
+    await refreshTerminalStatus();
+  }
+
+  function showTerminalGuide() {
+    setTerminalMessage(`./scripts/install-zsh-integration.sh\nsource ~/.zshrc`);
   }
 
   function startWindowDrag(event: React.MouseEvent<HTMLElement>) {
@@ -976,6 +1056,52 @@ function App() {
                       <button>{text.native}</button>
                     </div>
                   </SettingRow>
+                </div>
+              ) : null}
+
+              {settingsTab === "terminal" ? (
+                <div className="settings-section terminal-panel">
+                  <SettingRow title={text.terminalCli} detail={text.terminalCliDetail}>
+                    <button className="settings-action" onClick={() => void buildTerminalCli().catch(showError)}>
+                      {text.terminalBuildCli}
+                    </button>
+                  </SettingRow>
+
+                  <div className="terminal-shells">
+                    {terminalStatuses.map((item) => (
+                      <div className="terminal-shell" key={item.shell}>
+                        <div>
+                          <h4>{item.shell}</h4>
+                          <p>
+                            {item.registered ? text.terminalRegistered : text.terminalNotRegistered}
+                            {" · "}
+                            {text.terminalConfig}: {item.config_path}
+                          </p>
+                        </div>
+                        <div className="terminal-actions">
+                          <button
+                            className="settings-action"
+                            onClick={() => void installShell(item.shell).catch(showError)}
+                          >
+                            {text.terminalRegister}
+                          </button>
+                          <button
+                            className="settings-action muted"
+                            onClick={() => void uninstallShell(item.shell).catch(showError)}
+                          >
+                            {text.terminalUnregister}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="terminal-note">
+                    <button className="settings-action muted" onClick={showTerminalGuide}>
+                      {text.terminalInstallGuide}
+                    </button>
+                    <span>{terminalMessage || text.terminalSourceHint}</span>
+                  </div>
                 </div>
               ) : null}
 

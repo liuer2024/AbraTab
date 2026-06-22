@@ -1223,6 +1223,79 @@ label,
   height: 28px;
 }
 
+.settings-action {
+  min-height: 28px;
+  border: 0;
+  border-radius: 5px;
+  padding: 5px 10px;
+  color: var(--accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.settings-action:hover {
+  background: var(--hover);
+}
+
+.settings-action.muted {
+  color: var(--ink-soft);
+}
+
+.terminal-shells {
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-shell {
+  min-height: 68px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 14px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.terminal-shell h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.terminal-shell p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-note {
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.terminal-note span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+}
+
 .swatches {
   display: flex;
   align-items: center;

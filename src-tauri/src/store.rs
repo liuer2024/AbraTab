@@ -293,8 +293,10 @@ impl Store {
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if !columns.iter().any(|name| name == column) {
-            self.conn
-                .execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), [])?;
+            self.conn.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+                [],
+            )?;
         }
         Ok(())
     }
