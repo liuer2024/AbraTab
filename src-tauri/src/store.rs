@@ -101,6 +101,32 @@ impl Store {
             .map_err(Into::into)
     }
 
+    pub fn get_by_shortcut(&self, shortcut: &str, shell: Option<&str>) -> Result<Option<Snippet>> {
+        let shortcut = shortcut.trim();
+        if shortcut.is_empty() {
+            return Ok(None);
+        }
+
+        let shell = shell.unwrap_or("any").trim();
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
+                FROM snippets
+                WHERE shortcut = ?1
+                  AND enabled = 1
+                  AND deleted_at IS NULL
+                  AND (shell = 'any' OR shell = ?2)
+                ORDER BY CASE WHEN shell = ?2 THEN 0 ELSE 1 END, updated_at DESC
+                LIMIT 1
+                "#,
+                params![shortcut, shell],
+                row_to_snippet,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn save(&self, input: SnippetInput) -> Result<Snippet> {
         let now = now_string();
         let id = input.id.unwrap_or_else(new_id);

@@ -55,6 +55,13 @@ fn set_snippet_favorite(id: String, favorite: bool) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn expand_snippet(shortcut: String, shell: Option<String>) -> Result<Option<String>, AppError> {
+    Ok(Store::open_default()?
+        .get_by_shortcut(&shortcut, shell.as_deref())?
+        .map(|snippet| snippet.body))
+}
+
+#[tauri::command]
 fn copy_snippet(id: String) -> Result<(), AppError> {
     let snippet = Store::open_default()?
         .get(&id)?
@@ -88,6 +95,7 @@ pub fn run() {
             restore_snippet,
             purge_snippet,
             set_snippet_favorite,
+            expand_snippet,
             copy_snippet,
             database_path
         ])

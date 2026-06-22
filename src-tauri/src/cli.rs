@@ -30,6 +30,14 @@ fn main() -> Result<()> {
             clipboard.set_text(snippet.body)?;
             println!("copied {}", snippet.id);
         }
+        "expand" => {
+            let shortcut = required(args.next(), "expand requires a shortcut")?;
+            let shell = args.next();
+            let snippet = store
+                .get_by_shortcut(&shortcut, shell.as_deref())?
+                .context("snippet shortcut not found")?;
+            print!("{}", snippet.body);
+        }
         "add" => {
             let title = required(args.next(), "add requires a title")?;
             let body = required(args.next(), "add requires a body")?;
@@ -91,7 +99,7 @@ fn print_snippets(snippets: &[models::Snippet]) {
 
 fn print_help() {
     println!(
-        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  db-path"
+        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  expand <shortcut> [shell]\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  db-path"
     );
 }
 
