@@ -3,7 +3,9 @@
 # When the current token matches a snippet shortcut, Tab replaces it with the
 # snippet body; otherwise Tab keeps fish's normal completion behavior.
 
-set -q ABRATAB_ROOT; or set -gx ABRATAB_ROOT /Users/smiler/Documents/98_personal/abraTab
+if not set -q ABRATAB_ROOT
+    set -gx ABRATAB_ROOT (cd (dirname (status filename))/..; and pwd -P)
+end
 
 function _abratab_cli
     if test -n "$ABRATAB_CLI"

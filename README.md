@@ -1,26 +1,59 @@
 # AbraTab
 
-AbraTab is a local terminal snippet manager built with Tauri, React, Rust, and SQLite.
+AbraTab is a local-first text expansion and code snippet manager. Type a
+trigger, press Tab, and expand reusable text anywhere you can type. It supports
+variable placeholders, categories, tags, shell-specific snippets, and terminal
+search.
 
-## MVP features
+AbraTab：本地优先的文本扩展与代码片段管理工具。输入触发词，按下 Tab，在任何能打字的地方瞬间展开，支持变量填充、分类与标签管理。
 
-- GUI snippet list with create, edit, delete, duplicate, search, and copy.
-- SQLite persistence in the app data directory.
-- Snippet fields: title, body, description, category, tags, shortcut, shell, enabled.
-- Simple `{{variable}}` placeholder highlighting in the editor.
-- CLI entry for listing, searching, printing, copying, adding, and removing snippets.
-- zsh/bash/fish Tab expansion and Ctrl+G search for snippet shortcuts.
+## Features
+
+- Local-first snippet storage with SQLite.
+- Desktop GUI built with Tauri, React, Rust, and SQLite.
+- Trigger-based expansion from zsh, bash, and fish.
+- `Ctrl+G` terminal search powered by `fzf`.
+- Variable placeholders such as `{{name}}`.
+- Categories, tags, favorites, pinning, and trash.
+- Shell-specific snippets for terminal workflows.
+- Lightweight CLI for listing, searching, copying, and expanding snippets.
+
+## Status
+
+AbraTab is early-stage software. The current focus is local snippet management,
+terminal expansion, and a polished desktop editing workflow.
 
 ## Development
+
+Requirements:
+
+- Node.js
+- pnpm
+- Rust
+- Tauri prerequisites for your operating system
+
+Install dependencies and start the app:
 
 ```bash
 pnpm install
 pnpm tauri:dev
 ```
 
+Build the frontend:
+
+```bash
+pnpm build
+```
+
+Build the desktop app:
+
+```bash
+pnpm tauri:build
+```
+
 ## CLI
 
-After building the Rust side, the CLI binary is available as `abratab-cli` from Cargo:
+After building the Rust side, the CLI binary is available as `abratab-cli`:
 
 ```bash
 cd src-tauri
@@ -31,10 +64,10 @@ cargo run --bin abratab-cli -- copy <id>
 cargo run --bin abratab-cli -- expand dlog
 ```
 
-## Shell expansion and search
+## Shell Expansion And Search
 
-Recommended: open AbraTab Settings -> Terminal, then use Register for zsh,
-bash, or fish.
+Recommended: open AbraTab Settings -> Terminal, then register zsh, bash, or
+fish from the app.
 
 Tab expansion only needs the local `abratab-cli` binary. Terminal search uses
 `fzf`; install it from Settings -> Terminal, or run:
@@ -43,25 +76,40 @@ Tab expansion only needs the local `abratab-cli` binary. Terminal search uses
 brew install fzf
 ```
 
-Install the zsh integration:
+Manual zsh installation:
 
 ```bash
 ./scripts/install-zsh-integration.sh
 ```
 
-Then restart the terminal or run `source ~/.zshrc`. Typing `dlog` and pressing
-Tab expands it to the snippet body when `dlog` is an enabled shortcut.
+Then restart the terminal or run:
+
+```bash
+source ~/.zshrc
+```
+
+Typing `dlog` and pressing Tab expands it to the snippet body when `dlog` is an
+enabled shortcut.
 
 Press `Ctrl+G` in the terminal to search snippets with `fzf` and replace the
 current command line with the selected snippet body. In iTerm2, `Command+G` is
 an app shortcut by default; map it in Profiles -> Keys to send `Ctrl+G` if you
 want that key.
 
-The installer writes a marked block to `~/.zshrc`, sets `ABRATAB_ROOT`, and uses
-the built `abratab-cli` binary instead of running Cargo on every Tab press.
-
-Uninstall:
+Uninstall manual zsh integration:
 
 ```bash
 ./scripts/uninstall-zsh-integration.sh
 ```
+
+## Data
+
+AbraTab stores snippets locally. On macOS, the default database path is:
+
+```text
+~/Library/Application Support/AbraTab/AbraTab.db
+```
+
+## License
+
+MIT

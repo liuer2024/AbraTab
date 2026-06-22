@@ -1,7 +1,32 @@
-node_modules
-dist
-src-tauri/target
-src-tauri/gen/schemas
-src-tauri/.abratab
-.DS_Store
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Frontend build output
+dist/
+
+# Tauri / Rust build output
+src-tauri/target/
+src-tauri/gen/
+
+# Local app data
+src-tauri/.abratab/
+.abratab/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs and diagnostics
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/

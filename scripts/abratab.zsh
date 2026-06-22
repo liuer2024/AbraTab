@@ -4,7 +4,10 @@
 # shortcut, Tab replaces it with the snippet body; otherwise Tab keeps zsh's
 # normal completion behavior.
 
-: "${ABRATAB_ROOT:=/Users/smiler/Documents/98_personal/abraTab}"
+if [[ -z "${ABRATAB_ROOT:-}" ]]; then
+  ABRATAB_ROOT="${${(%):-%x}:A:h:h}"
+fi
+export ABRATAB_ROOT
 
 _abratab_cli() {
   if [[ -n "${ABRATAB_CLI:-}" ]]; then

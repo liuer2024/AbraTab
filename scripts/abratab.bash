@@ -3,7 +3,8 @@
 # When the current word matches a snippet shortcut, Tab replaces it with the
 # snippet body. If no shortcut matches, bash falls back to readline completion.
 
-: "${ABRATAB_ROOT:=/Users/smiler/Documents/98_personal/abraTab}"
+: "${ABRATAB_ROOT:=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+export ABRATAB_ROOT
 
 _abratab_cli() {
   if [[ -n "${ABRATAB_CLI:-}" ]]; then
