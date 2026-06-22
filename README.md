@@ -51,6 +51,20 @@ Build the desktop app:
 pnpm tauri:build
 ```
 
+## Automated Builds
+
+GitHub Actions runs CI on pushes and pull requests to `main`.
+
+To create a release build, push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds the macOS app and creates a draft GitHub Release.
+Review the generated assets, then publish the release from GitHub.
+
 ## CLI
 
 After building the Rust side, the CLI binary is available as `abratab-cli`:
