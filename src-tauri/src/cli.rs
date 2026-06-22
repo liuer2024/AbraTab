@@ -13,10 +13,10 @@ fn main() -> Result<()> {
     let store = Store::open_default()?;
 
     match command.as_str() {
-        "list" => print_snippets(&store.list(None)?),
+        "list" => print_snippets(&store.list(None, false)?),
         "search" => {
             let query = args.collect::<Vec<_>>().join(" ");
-            print_snippets(&store.list(Some(&query))?);
+            print_snippets(&store.list(Some(&query), false)?);
         }
         "print" => {
             let id = required(args.next(), "print requires a snippet id")?;
@@ -43,12 +43,29 @@ fn main() -> Result<()> {
                 shortcut: None,
                 shell: Some("any".into()),
                 enabled: Some(true),
+                favorite: Some(false),
             })?;
             println!("{}", snippet.id);
         }
         "delete" | "remove" => {
             let id = required(args.next(), "delete requires a snippet id")?;
             store.delete(&id)?;
+        }
+        "restore" => {
+            let id = required(args.next(), "restore requires a snippet id")?;
+            store.restore(&id)?;
+        }
+        "purge" => {
+            let id = required(args.next(), "purge requires a snippet id")?;
+            store.purge(&id)?;
+        }
+        "favorite" => {
+            let id = required(args.next(), "favorite requires a snippet id")?;
+            let favorite = args
+                .next()
+                .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
+                .unwrap_or(true);
+            store.set_favorite(&id, favorite)?;
         }
         "db-path" => println!("{}", store::default_db_path()?.display()),
         "help" | "--help" | "-h" => print_help(),
@@ -74,7 +91,7 @@ fn print_snippets(snippets: &[models::Snippet]) {
 
 fn print_help() {
     println!(
-        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  add <title> <body>\n  delete <id>\n  db-path"
+        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  db-path"
     );
 }
 

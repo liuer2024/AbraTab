@@ -45,14 +45,14 @@ impl Store {
         Ok(store)
     }
 
-    pub fn list(&self, query: Option<&str>) -> Result<Vec<Snippet>> {
+    pub fn list(&self, query: Option<&str>, include_deleted: bool) -> Result<Vec<Snippet>> {
         let snippets = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
                 FROM snippets
-                WHERE enabled = 1
+                WHERE (?2 = 1 OR deleted_at IS NULL)
                   AND (
                     lower(title) LIKE ?1
                     OR lower(body) LIKE ?1
@@ -65,19 +65,20 @@ impl Store {
                 "#,
             )?;
             let rows = stmt
-                .query_map(params![pattern], row_to_snippet)?
+                .query_map(params![pattern, include_deleted], row_to_snippet)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         } else {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
                 FROM snippets
+                WHERE (?1 = 1 OR deleted_at IS NULL)
                 ORDER BY updated_at DESC
                 "#,
             )?;
             let rows = stmt
-                .query_map([], row_to_snippet)?
+                .query_map(params![include_deleted], row_to_snippet)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         };
@@ -89,7 +90,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
                 FROM snippets
                 WHERE id = ?1
                 "#,
@@ -112,8 +113,8 @@ impl Store {
 
         self.conn.execute(
             r#"
-            INSERT INTO snippets (id, title, body, description, category, tags, shortcut, shell, enabled, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            INSERT INTO snippets (id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 body = excluded.body,
@@ -123,6 +124,8 @@ impl Store {
                 shortcut = excluded.shortcut,
                 shell = excluded.shell,
                 enabled = excluded.enabled,
+                favorite = excluded.favorite,
+                deleted_at = NULL,
                 updated_at = excluded.updated_at
             "#,
             params![
@@ -135,6 +138,7 @@ impl Store {
                 input.shortcut.unwrap_or_default(),
                 input.shell.unwrap_or_else(|| "any".to_string()),
                 input.enabled.unwrap_or(true),
+                input.favorite.unwrap_or(false),
                 created_at,
                 now,
             ],
@@ -144,8 +148,35 @@ impl Store {
     }
 
     pub fn delete(&self, id: &str) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE snippets SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn restore(&self, id: &str) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE snippets SET deleted_at = NULL, updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn purge(&self, id: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM snippets WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE snippets SET favorite = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, favorite, now],
+        )?;
         Ok(())
     }
 
@@ -162,6 +193,8 @@ impl Store {
                 shortcut TEXT NOT NULL DEFAULT '',
                 shell TEXT NOT NULL DEFAULT 'any',
                 enabled INTEGER NOT NULL DEFAULT 1,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -170,6 +203,8 @@ impl Store {
             CREATE INDEX IF NOT EXISTS snippets_shortcut_idx ON snippets(shortcut);
             "#,
         )?;
+        self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
+        self.add_column_if_missing("snippets", "deleted_at", "TEXT")?;
 
         let count: i64 = self
             .conn
@@ -192,6 +227,7 @@ impl Store {
                 shortcut: Some("dlog".into()),
                 shell: Some("any".into()),
                 enabled: Some(true),
+                favorite: Some(false),
             },
             SnippetInput {
                 id: None,
@@ -203,6 +239,7 @@ impl Store {
                 shortcut: Some("gfb".into()),
                 shell: Some("any".into()),
                 enabled: Some(true),
+                favorite: Some(false),
             },
             SnippetInput {
                 id: None,
@@ -214,11 +251,24 @@ impl Store {
                 shortcut: Some("cpost".into()),
                 shell: Some("any".into()),
                 enabled: Some(true),
+                favorite: Some(true),
             },
         ];
 
         for example in examples {
             self.save(example)?;
+        }
+        Ok(())
+    }
+
+    fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !columns.iter().any(|name| name == column) {
+            self.conn
+                .execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), [])?;
         }
         Ok(())
     }
@@ -241,8 +291,10 @@ fn row_to_snippet(row: &rusqlite::Row<'_>) -> rusqlite::Result<Snippet> {
         shortcut: row.get(6)?,
         shell: row.get(7)?,
         enabled: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        favorite: row.get(9)?,
+        deleted_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 

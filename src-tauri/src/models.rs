@@ -11,6 +11,8 @@ pub struct Snippet {
     pub shortcut: String,
     pub shell: String,
     pub enabled: bool,
+    pub favorite: bool,
+    pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -26,4 +28,5 @@ pub struct SnippetInput {
     pub shortcut: Option<String>,
     pub shell: Option<String>,
     pub enabled: Option<bool>,
+    pub favorite: Option<bool>,
 }

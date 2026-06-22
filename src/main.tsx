@@ -15,6 +15,7 @@ import {
   Info,
   Monitor,
   Palette,
+  RotateCcw,
   Save,
   Search,
   Settings,
@@ -37,6 +38,8 @@ type Snippet = {
   shortcut: string;
   shell: string;
   enabled: boolean;
+  favorite: boolean;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +54,7 @@ type FormState = {
   shortcut: string;
   shell: string;
   enabled: boolean;
+  favorite: boolean;
 };
 
 const blankForm: FormState = {
@@ -62,12 +66,14 @@ const blankForm: FormState = {
   shortcut: "",
   shell: "any",
   enabled: true,
+  favorite: false,
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
 type SettingsTab = "appearance" | "font" | "window" | "about";
 type Locale = "zh" | "en" | "ja";
 type Theme = "graphite" | "notion" | "paper" | "mint" | "dusk" | "midnight";
+type LibraryView = "all" | "favorites" | "trash";
 
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
@@ -96,6 +102,8 @@ const translations = {
     preview: "预览",
     copy: "复制",
     delete: "删除",
+    restore: "恢复",
+    permanentDelete: "彻底删除",
     save: "保存",
     trigger: "触发词",
     press: "按",
@@ -110,6 +118,8 @@ const translations = {
     titleRequired: "标题和正文不能为空。",
     saved: "已保存",
     deleted: "已删除片段。",
+    restored: "已恢复片段。",
+    permanentlyDeleted: "已彻底删除片段。",
     copied: "已复制正文到剪贴板。",
     noSnippets: "没有找到片段",
     settingsSubtitle: "AbraTab 偏好设置",
@@ -176,6 +186,8 @@ const translations = {
     preview: "Preview",
     copy: "Copy",
     delete: "Delete",
+    restore: "Restore",
+    permanentDelete: "Delete permanently",
     save: "Save",
     trigger: "trigger",
     press: "press",
@@ -190,6 +202,8 @@ const translations = {
     titleRequired: "Title and body are required.",
     saved: "Saved",
     deleted: "Deleted snippet.",
+    restored: "Restored snippet.",
+    permanentlyDeleted: "Deleted snippet permanently.",
     copied: "Copied body to clipboard.",
     noSnippets: "No snippets found",
     settingsSubtitle: "AbraTab preferences",
@@ -256,6 +270,8 @@ const translations = {
     preview: "プレビュー",
     copy: "コピー",
     delete: "削除",
+    restore: "復元",
+    permanentDelete: "完全に削除",
     save: "保存",
     trigger: "トリガー",
     press: "押して",
@@ -270,6 +286,8 @@ const translations = {
     titleRequired: "タイトルと本文は必須です。",
     saved: "保存しました",
     deleted: "スニペットを削除しました。",
+    restored: "スニペットを復元しました。",
+    permanentlyDeleted: "スニペットを完全に削除しました。",
     copied: "本文をクリップボードにコピーしました。",
     noSnippets: "スニペットが見つかりません",
     settingsSubtitle: "AbraTab の環境設定",
@@ -325,6 +343,7 @@ function App() {
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [activeView, setActiveView] = useState<LibraryView>("all");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(blankForm);
@@ -336,6 +355,8 @@ function App() {
   const [theme, setTheme] = useState<Theme>("graphite");
 
   const selected = snippets.find((snippet) => snippet.id === selectedId) ?? null;
+  const liveSnippets = useMemo(() => snippets.filter((snippet) => !snippet.deleted_at), [snippets]);
+  const deletedSnippets = useMemo(() => snippets.filter((snippet) => snippet.deleted_at), [snippets]);
   const text = translations[locale];
   const displayCategory = (category: string | null | undefined) =>
     !category || category === "Uncategorized" ? text.uncategorized : category;
@@ -347,29 +368,34 @@ function App() {
 
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const snippet of snippets) {
+    for (const snippet of liveSnippets) {
       const category = snippet.category || "Uncategorized";
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
     return Array.from(counts.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [snippets]);
+  }, [liveSnippets]);
 
   const tags = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const snippet of snippets) {
+    for (const snippet of liveSnippets) {
       for (const tag of snippet.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     }
     return Array.from(counts.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [snippets]);
+  }, [liveSnippets]);
 
   const filteredSnippets = useMemo(() => {
     return snippets.filter((snippet) => {
+      if (activeView === "trash") {
+        return Boolean(snippet.deleted_at);
+      }
+      if (snippet.deleted_at) return false;
+      if (activeView === "favorites" && !snippet.favorite) return false;
       const category = snippet.category || "Uncategorized";
       if (activeCategory && category !== activeCategory) return false;
       if (activeTag && !snippet.tags.includes(activeTag)) return false;
       return true;
     });
-  }, [activeCategory, activeTag, snippets]);
+  }, [activeCategory, activeTag, activeView, snippets]);
 
   useEffect(() => {
     void refresh();
@@ -379,10 +405,15 @@ function App() {
   async function refresh(nextQuery = query) {
     const rows = await invoke<Snippet[]>("list_snippets", {
       query: nextQuery.trim() || null,
+      includeDeleted: true,
     });
     setSnippets(rows);
-    if (!selectedId && rows.length > 0) {
-      loadIntoForm(rows[0]);
+    const selectedRow = selectedId ? rows.find((row) => row.id === selectedId) : null;
+    if (selectedRow) {
+      loadIntoForm(selectedRow);
+    } else if (!selectedId) {
+      const firstLive = rows.find((row) => !row.deleted_at);
+      if (firstLive) loadIntoForm(firstLive);
     }
   }
 
@@ -398,13 +429,16 @@ function App() {
       shortcut: snippet.shortcut,
       shell: snippet.shell,
       enabled: snippet.enabled,
+      favorite: snippet.favorite,
     });
   }
 
   function createNew() {
     setSelectedId(null);
+    setActiveView("all");
     setForm({
       ...blankForm,
+      favorite: activeView === "favorites",
       category: activeCategory && activeCategory !== "Uncategorized" ? activeCategory : "",
       tagsText: activeTag ?? "",
     });
@@ -430,6 +464,7 @@ function App() {
         shortcut: form.shortcut,
         shell: form.shell,
         enabled: form.enabled,
+        favorite: form.favorite,
       },
     });
     setStatus(`${text.saved} ${saved.title}`);
@@ -439,10 +474,31 @@ function App() {
 
   async function remove() {
     if (!form.id) return;
-    await invoke("delete_snippet", { id: form.id });
-    setStatus(text.deleted);
+    if (selected?.deleted_at) {
+      await invoke("purge_snippet", { id: form.id });
+      setStatus(text.permanentlyDeleted);
+    } else {
+      await invoke("delete_snippet", { id: form.id });
+      setStatus(text.deleted);
+    }
     setSelectedId(null);
     setForm(blankForm);
+    await refresh();
+  }
+
+  async function restore() {
+    if (!form.id) return;
+    await invoke("restore_snippet", { id: form.id });
+    setStatus(text.restored);
+    setActiveView("all");
+    await refresh();
+  }
+
+  async function toggleFavorite() {
+    const nextFavorite = !form.favorite;
+    setForm({ ...form, favorite: nextFavorite });
+    if (!form.id) return;
+    await invoke("set_snippet_favorite", { id: form.id, favorite: nextFavorite });
     await refresh();
   }
 
@@ -456,6 +512,19 @@ function App() {
   }
 
   function clearFilters() {
+    setActiveView("all");
+    setActiveCategory(null);
+    setActiveTag(null);
+  }
+
+  function showFavorites() {
+    setActiveView("favorites");
+    setActiveCategory(null);
+    setActiveTag(null);
+  }
+
+  function showTrash() {
+    setActiveView("trash");
     setActiveCategory(null);
     setActiveTag(null);
   }
@@ -483,25 +552,26 @@ function App() {
           </div>
           <div data-tauri-drag-region>
             <h1>AbraTab</h1>
-            <p>{snippets.length} {text.snippets}</p>
+            <p>{liveSnippets.length} {text.snippets}</p>
           </div>
         </div>
 
         <div className="nav-scroll">
           <div className="nav-section">{text.library}</div>
-          <button className={`nav-item ${!activeCategory && !activeTag ? "on" : ""}`} onClick={clearFilters}>
+          <button className={`nav-item ${activeView === "all" && !activeCategory && !activeTag ? "on" : ""}`} onClick={clearFilters}>
             <Grid2X2 size={15} />
             <span>{text.allSnippets}</span>
-            <b>{snippets.length}</b>
+            <b>{liveSnippets.length}</b>
           </button>
-          <button className="nav-item">
+          <button className={`nav-item ${activeView === "favorites" ? "on" : ""}`} onClick={showFavorites}>
             <Star size={15} />
             <span>{text.favorites}</span>
-            <b>0</b>
+            <b>{liveSnippets.filter((snippet) => snippet.favorite).length}</b>
           </button>
           <button
-            className={`nav-item ${activeCategory === "Uncategorized" ? "on" : ""}`}
+            className={`nav-item ${activeView === "all" && activeCategory === "Uncategorized" ? "on" : ""}`}
             onClick={() => {
+              setActiveView("all");
               setActiveCategory("Uncategorized");
               setActiveTag(null);
             }}
@@ -510,10 +580,10 @@ function App() {
             <span>{text.uncategorized}</span>
             <b>{categories.find(([name]) => name === "Uncategorized")?.[1] ?? 0}</b>
           </button>
-          <button className="nav-item">
+          <button className={`nav-item ${activeView === "trash" ? "on" : ""}`} onClick={showTrash}>
             <Trash2 size={15} />
             <span>{text.trash}</span>
-            <b>0</b>
+            <b>{deletedSnippets.length}</b>
           </button>
 
           <div className="nav-section">{text.categories}</div>
@@ -522,8 +592,9 @@ function App() {
             .map(([name, count]) => (
               <button
                 key={name}
-                className={`folder-row ${activeCategory === name ? "on" : ""}`}
+                className={`folder-row ${activeView === "all" && activeCategory === name ? "on" : ""}`}
                 onClick={() => {
+                  setActiveView("all");
                   setActiveCategory(name);
                   setActiveTag(null);
                 }}
@@ -539,8 +610,9 @@ function App() {
           {tags.map(([name, count], index) => (
             <button
               key={name}
-              className={`tag-row ${activeTag === name ? "on" : ""}`}
+              className={`tag-row ${activeView === "all" && activeTag === name ? "on" : ""}`}
               onClick={() => {
+                setActiveView("all");
                 setActiveTag(name);
                 setActiveCategory(null);
               }}
@@ -556,7 +628,17 @@ function App() {
           <button title={text.newSnippet} onClick={createNew}>
             <FilePlus2 size={15} />
           </button>
-          <span>{activeTag ? `#${activeTag}` : activeCategory ? displayCategory(activeCategory) : text.allSnippets}</span>
+          <span>
+            {activeView === "trash"
+              ? text.trash
+              : activeView === "favorites"
+                ? text.favorites
+                : activeTag
+                  ? `#${activeTag}`
+                  : activeCategory
+                    ? displayCategory(activeCategory)
+                    : text.allSnippets}
+          </span>
           <button title={text.settings} onClick={() => setSettingsOpen(true)}>
             <Settings size={15} />
           </button>
@@ -620,8 +702,13 @@ function App() {
           </div>
 
           <div className="editor-tools">
-            <button className="icon-button fav on" title={text.favorite}>
-              <Star size={16} fill="currentColor" />
+            <button
+              className={`icon-button fav ${form.favorite ? "on" : ""}`}
+              title={text.favorite}
+              onClick={toggleFavorite}
+              disabled={Boolean(selected?.deleted_at)}
+            >
+              <Star size={16} fill={form.favorite ? "currentColor" : "none"} />
             </button>
             <button className="icon-button" title={text.preview}>
               <Eye size={16} />
@@ -629,10 +716,20 @@ function App() {
             <button className="icon-button" title={text.copy} onClick={copyBody} disabled={!form.body.trim()}>
               <Clipboard size={16} />
             </button>
-            <button className="icon-button danger" title={text.delete} onClick={remove} disabled={!form.id}>
+            {selected?.deleted_at ? (
+              <button className="icon-button" title={text.restore} onClick={restore} disabled={!form.id}>
+                <RotateCcw size={16} />
+              </button>
+            ) : null}
+            <button
+              className="icon-button danger"
+              title={selected?.deleted_at ? text.permanentDelete : text.delete}
+              onClick={remove}
+              disabled={!form.id}
+            >
               <Trash2 size={16} />
             </button>
-            <button className="save-button" onClick={save}>
+            <button className="save-button" onClick={save} disabled={Boolean(selected?.deleted_at)}>
               <Save size={14} />
               {text.save}
             </button>

@@ -21,8 +21,8 @@ impl serde::Serialize for AppError {
 }
 
 #[tauri::command]
-fn list_snippets(query: Option<String>) -> Result<Vec<Snippet>, AppError> {
-    Ok(Store::open_default()?.list(query.as_deref())?)
+fn list_snippets(query: Option<String>, include_deleted: Option<bool>) -> Result<Vec<Snippet>, AppError> {
+    Ok(Store::open_default()?.list(query.as_deref(), include_deleted.unwrap_or(false))?)
 }
 
 #[tauri::command]
@@ -33,6 +33,24 @@ fn save_snippet(input: SnippetInput) -> Result<Snippet, AppError> {
 #[tauri::command]
 fn delete_snippet(id: String) -> Result<(), AppError> {
     Store::open_default()?.delete(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn restore_snippet(id: String) -> Result<(), AppError> {
+    Store::open_default()?.restore(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn purge_snippet(id: String) -> Result<(), AppError> {
+    Store::open_default()?.purge(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_snippet_favorite(id: String, favorite: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_favorite(&id, favorite)?;
     Ok(())
 }
 
@@ -67,6 +85,9 @@ pub fn run() {
             list_snippets,
             save_snippet,
             delete_snippet,
+            restore_snippet,
+            purge_snippet,
+            set_snippet_favorite,
             copy_snippet,
             database_path
         ])
