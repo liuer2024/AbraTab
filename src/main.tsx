@@ -556,10 +556,10 @@ function App() {
           <button title={text.newSnippet} onClick={createNew}>
             <FilePlus2 size={15} />
           </button>
+          <span>{activeTag ? `#${activeTag}` : activeCategory ? displayCategory(activeCategory) : text.allSnippets}</span>
           <button title={text.settings} onClick={() => setSettingsOpen(true)}>
             <Settings size={15} />
           </button>
-          <span>{activeTag ? `#${activeTag}` : activeCategory ? displayCategory(activeCategory) : text.allSnippets}</span>
         </div>
       </nav>
 
