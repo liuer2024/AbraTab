@@ -12,6 +12,7 @@ pub struct Snippet {
     pub shell: String,
     pub enabled: bool,
     pub favorite: bool,
+    pub pinned: bool,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -29,4 +30,5 @@ pub struct SnippetInput {
     pub shell: Option<String>,
     pub enabled: Option<bool>,
     pub favorite: Option<bool>,
+    pub pinned: Option<bool>,
 }

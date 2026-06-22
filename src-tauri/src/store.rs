@@ -50,7 +50,7 @@ impl Store {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at
                 FROM snippets
                 WHERE (?2 = 1 OR deleted_at IS NULL)
                   AND (
@@ -61,7 +61,7 @@ impl Store {
                     OR lower(tags) LIKE ?1
                     OR lower(shortcut) LIKE ?1
                   )
-                ORDER BY updated_at DESC
+                ORDER BY pinned DESC, updated_at DESC
                 "#,
             )?;
             let rows = stmt
@@ -71,10 +71,10 @@ impl Store {
         } else {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at
                 FROM snippets
                 WHERE (?1 = 1 OR deleted_at IS NULL)
-                ORDER BY updated_at DESC
+                ORDER BY pinned DESC, updated_at DESC
                 "#,
             )?;
             let rows = stmt
@@ -90,7 +90,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at
                 FROM snippets
                 WHERE id = ?1
                 "#,
@@ -111,7 +111,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at
+                SELECT id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at
                 FROM snippets
                 WHERE shortcut = ?1
                   AND enabled = 1
@@ -139,8 +139,8 @@ impl Store {
 
         self.conn.execute(
             r#"
-            INSERT INTO snippets (id, title, body, description, category, tags, shortcut, shell, enabled, favorite, deleted_at, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)
+            INSERT INTO snippets (id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 body = excluded.body,
@@ -151,6 +151,7 @@ impl Store {
                 shell = excluded.shell,
                 enabled = excluded.enabled,
                 favorite = excluded.favorite,
+                pinned = excluded.pinned,
                 deleted_at = NULL,
                 updated_at = excluded.updated_at
             "#,
@@ -165,6 +166,7 @@ impl Store {
                 input.shell.unwrap_or_else(|| "any".to_string()),
                 input.enabled.unwrap_or(true),
                 input.favorite.unwrap_or(false),
+                input.pinned.or_else(|| existing.as_ref().map(|snippet| snippet.pinned)).unwrap_or(false),
                 created_at,
                 now,
             ],
@@ -206,6 +208,24 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE snippets SET pinned = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, pinned, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_category(&self, id: &str, category: &str) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE snippets SET category = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, category.trim(), now],
+        )?;
+        Ok(())
+    }
+
     fn migrate(&self) -> Result<()> {
         self.conn.execute_batch(
             r#"
@@ -220,6 +240,7 @@ impl Store {
                 shell TEXT NOT NULL DEFAULT 'any',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 favorite INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
                 deleted_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -230,6 +251,7 @@ impl Store {
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
+        self.add_column_if_missing("snippets", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
         self.add_column_if_missing("snippets", "deleted_at", "TEXT")?;
 
         let count: i64 = self
@@ -254,6 +276,7 @@ impl Store {
                 shell: Some("any".into()),
                 enabled: Some(true),
                 favorite: Some(false),
+                pinned: Some(false),
             },
             SnippetInput {
                 id: None,
@@ -266,6 +289,7 @@ impl Store {
                 shell: Some("any".into()),
                 enabled: Some(true),
                 favorite: Some(false),
+                pinned: Some(false),
             },
             SnippetInput {
                 id: None,
@@ -278,6 +302,7 @@ impl Store {
                 shell: Some("any".into()),
                 enabled: Some(true),
                 favorite: Some(true),
+                pinned: Some(true),
             },
         ];
 
@@ -320,9 +345,10 @@ fn row_to_snippet(row: &rusqlite::Row<'_>) -> rusqlite::Result<Snippet> {
         shell: row.get(7)?,
         enabled: row.get(8)?,
         favorite: row.get(9)?,
-        deleted_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        pinned: row.get(10)?,
+        deleted_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 

@@ -1,22 +1,20 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Check,
   ChevronRight,
-  Clipboard,
   Code2,
   Database,
-  Eye,
   FilePlus2,
   Folder,
   Grid2X2,
   Info,
   Monitor,
   Palette,
+  Pin,
   RotateCcw,
-  Save,
   Search,
   Settings,
   Star,
@@ -39,6 +37,7 @@ type Snippet = {
   shell: string;
   enabled: boolean;
   favorite: boolean;
+  pinned: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -55,6 +54,7 @@ type FormState = {
   shell: string;
   enabled: boolean;
   favorite: boolean;
+  pinned: boolean;
 };
 
 const blankForm: FormState = {
@@ -67,6 +67,7 @@ const blankForm: FormState = {
   shell: "any",
   enabled: true,
   favorite: false,
+  pinned: false,
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
@@ -113,6 +114,9 @@ const translations = {
     delete: "删除",
     restore: "恢复",
     permanentDelete: "彻底删除",
+    pin: "置顶",
+    unpin: "取消置顶",
+    moveCategory: "移动分类",
     save: "保存",
     trigger: "触发词",
     press: "按",
@@ -209,6 +213,9 @@ const translations = {
     delete: "Delete",
     restore: "Restore",
     permanentDelete: "Delete permanently",
+    pin: "Pin",
+    unpin: "Unpin",
+    moveCategory: "Move category",
     save: "Save",
     trigger: "trigger",
     press: "press",
@@ -305,6 +312,9 @@ const translations = {
     delete: "削除",
     restore: "復元",
     permanentDelete: "完全に削除",
+    pin: "固定",
+    unpin: "固定解除",
+    moveCategory: "カテゴリ移動",
     save: "保存",
     trigger: "トリガー",
     press: "押して",
@@ -400,6 +410,8 @@ function App() {
   const [theme, setTheme] = useState<Theme>("graphite");
   const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
   const [terminalMessage, setTerminalMessage] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; snippet: Snippet } | null>(null);
+  const tagsInputRef = useRef<HTMLInputElement>(null);
 
   const selected = snippets.find((snippet) => snippet.id === selectedId) ?? null;
   const liveSnippets = useMemo(() => snippets.filter((snippet) => !snippet.deleted_at), [snippets]);
@@ -483,6 +495,7 @@ function App() {
       shell: snippet.shell,
       enabled: snippet.enabled,
       favorite: snippet.favorite,
+      pinned: snippet.pinned,
     });
   }
 
@@ -518,6 +531,7 @@ function App() {
         shell: form.shell,
         enabled: form.enabled,
         favorite: form.favorite,
+        pinned: form.pinned,
       },
     });
     setStatus(`${text.saved} ${saved.title}`);
@@ -552,6 +566,32 @@ function App() {
     setForm({ ...form, favorite: nextFavorite });
     if (!form.id) return;
     await invoke("set_snippet_favorite", { id: form.id, favorite: nextFavorite });
+    await refresh();
+  }
+
+  async function togglePinned(snippet = selected) {
+    if (!snippet) return;
+    await invoke("set_snippet_pinned", { id: snippet.id, pinned: !snippet.pinned });
+    setContextMenu(null);
+    await refresh();
+  }
+
+  async function moveCategory(snippet: Snippet) {
+    const category = window.prompt(text.moveCategory, snippet.category || "");
+    if (category === null) return;
+    await invoke("move_snippet_category", { id: snippet.id, category });
+    setContextMenu(null);
+    await refresh();
+  }
+
+  async function deleteSnippet(snippet: Snippet) {
+    await invoke("delete_snippet", { id: snippet.id });
+    if (selectedId === snippet.id) {
+      setSelectedId(null);
+      setForm(blankForm);
+    }
+    setContextMenu(null);
+    setStatus(text.deleted);
     await refresh();
   }
 
@@ -623,7 +663,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell" data-theme={theme}>
+    <main className="app-shell" data-theme={theme} onClick={() => setContextMenu(null)}>
       <div className="window-drag-strip" data-tauri-drag-region onMouseDown={startWindowDrag} />
       <nav className="nav-panel">
         <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
@@ -749,8 +789,14 @@ function App() {
               key={snippet.id}
               className={`snippet-item ${snippet.id === selectedId ? "selected" : ""}`}
               onClick={() => loadIntoForm(snippet)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                loadIntoForm(snippet);
+                setContextMenu({ x: event.clientX, y: event.clientY, snippet });
+              }}
             >
               <div className="snippet-title-row">
+                {snippet.pinned ? <Pin size={12} className="pin-mark" /> : null}
                 {snippet.enabled ? <span className="hot">●</span> : null}
                 <span className="snippet-title">{snippet.title}</span>
               </div>
@@ -790,29 +836,14 @@ function App() {
             >
               <Star size={16} fill={form.favorite ? "currentColor" : "none"} />
             </button>
-            <button className="icon-button" title={text.preview}>
-              <Eye size={16} />
-            </button>
-            <button className="icon-button" title={text.copy} onClick={copyBody} disabled={!form.body.trim()}>
-              <Clipboard size={16} />
+            <button className="icon-button" title={text.tags} onClick={() => tagsInputRef.current?.focus()}>
+              <Tag size={16} />
             </button>
             {selected?.deleted_at ? (
               <button className="icon-button" title={text.restore} onClick={restore} disabled={!form.id}>
                 <RotateCcw size={16} />
               </button>
             ) : null}
-            <button
-              className="icon-button danger"
-              title={selected?.deleted_at ? text.permanentDelete : text.delete}
-              onClick={remove}
-              disabled={!form.id}
-            >
-              <Trash2 size={16} />
-            </button>
-            <button className="save-button" onClick={save} disabled={Boolean(selected?.deleted_at)}>
-              <Save size={14} />
-              {text.save}
-            </button>
           </div>
         </header>
 
@@ -853,6 +884,7 @@ function App() {
             <label>
               <span>{text.tags}</span>
               <input
+                ref={tagsInputRef}
                 value={form.tagsText}
                 onChange={(event) => setForm({ ...form, tagsText: event.target.value })}
                 placeholder="curl, api"
@@ -1126,6 +1158,28 @@ function App() {
               ) : null}
             </div>
           </section>
+        </div>
+      ) : null}
+
+      {contextMenu ? (
+        <div
+          className="snippet-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button onClick={() => void togglePinned(contextMenu.snippet).catch(showError)}>
+            <Pin size={14} />
+            <span>{contextMenu.snippet.pinned ? text.unpin : text.pin}</span>
+          </button>
+          <button onClick={() => void moveCategory(contextMenu.snippet).catch(showError)}>
+            <Folder size={14} />
+            <span>{text.moveCategory}</span>
+          </button>
+          <button className="danger" onClick={() => void deleteSnippet(contextMenu.snippet).catch(showError)}>
+            <Trash2 size={14} />
+            <span>{text.delete}</span>
+          </button>
         </div>
       ) : null}
     </main>

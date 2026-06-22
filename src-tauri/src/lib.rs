@@ -76,6 +76,18 @@ fn set_snippet_favorite(id: String, favorite: bool) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn set_snippet_pinned(id: String, pinned: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_pinned(&id, pinned)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn move_snippet_category(id: String, category: String) -> Result<(), AppError> {
+    Store::open_default()?.set_category(&id, &category)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn expand_snippet(shortcut: String, shell: Option<String>) -> Result<Option<String>, AppError> {
     Ok(Store::open_default()?
         .get_by_shortcut(&shortcut, shell.as_deref())?
@@ -294,6 +306,8 @@ pub fn run() {
             restore_snippet,
             purge_snippet,
             set_snippet_favorite,
+            set_snippet_pinned,
+            move_snippet_category,
             expand_snippet,
             copy_snippet,
             database_path,

@@ -52,6 +52,7 @@ fn main() -> Result<()> {
                 shell: Some("any".into()),
                 enabled: Some(true),
                 favorite: Some(false),
+                pinned: Some(false),
             })?;
             println!("{}", snippet.id);
         }
@@ -74,6 +75,19 @@ fn main() -> Result<()> {
                 .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
                 .unwrap_or(true);
             store.set_favorite(&id, favorite)?;
+        }
+        "pin" => {
+            let id = required(args.next(), "pin requires a snippet id")?;
+            let pinned = args
+                .next()
+                .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
+                .unwrap_or(true);
+            store.set_pinned(&id, pinned)?;
+        }
+        "category" => {
+            let id = required(args.next(), "category requires a snippet id")?;
+            let category = required(args.next(), "category requires a category")?;
+            store.set_category(&id, &category)?;
         }
         "db-path" => println!("{}", store::default_db_path()?.display()),
         "help" | "--help" | "-h" => print_help(),
@@ -99,7 +113,7 @@ fn print_snippets(snippets: &[models::Snippet]) {
 
 fn print_help() {
     println!(
-        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  expand <shortcut> [shell]\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  db-path"
+        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  expand <shortcut> [shell]\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  pin <id> [on|off]\n  category <id> <category>\n  db-path"
     );
 }
 
