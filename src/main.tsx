@@ -157,6 +157,7 @@ const translations = {
     terminalRegistered: "已注册",
     terminalNotRegistered: "未注册",
     terminalRegister: "注册",
+    terminalReregister: "重新注册",
     terminalUnregister: "取消注册",
     terminalConfig: "配置文件",
     terminalSourceHint: "已打开的终端需要重新 source 配置或新开窗口。",
@@ -256,6 +257,7 @@ const translations = {
     terminalRegistered: "Registered",
     terminalNotRegistered: "Not registered",
     terminalRegister: "Register",
+    terminalReregister: "Re-register",
     terminalUnregister: "Unregister",
     terminalConfig: "Config",
     terminalSourceHint: "Open terminal sessions need source config or a new window.",
@@ -355,6 +357,7 @@ const translations = {
     terminalRegistered: "登録済み",
     terminalNotRegistered: "未登録",
     terminalRegister: "登録",
+    terminalReregister: "再登録",
     terminalUnregister: "登録解除",
     terminalConfig: "設定ファイル",
     terminalSourceHint: "開いているターミナルは source または新規ウィンドウが必要です。",
@@ -1103,10 +1106,13 @@ function App() {
                     {terminalStatuses.map((item) => (
                       <div className="terminal-shell" key={item.shell}>
                         <div>
-                          <h4>{item.shell}</h4>
+                          <h4>
+                            {item.shell}
+                            <span className={`terminal-badge ${item.registered ? "ok" : ""}`}>
+                              {item.registered ? text.terminalRegistered : text.terminalNotRegistered}
+                            </span>
+                          </h4>
                           <p>
-                            {item.registered ? text.terminalRegistered : text.terminalNotRegistered}
-                            {" · "}
                             {text.terminalConfig}: {item.config_path}
                           </p>
                         </div>
@@ -1115,7 +1121,7 @@ function App() {
                             className="settings-action"
                             onClick={() => void installShell(item.shell).catch(showError)}
                           >
-                            {text.terminalRegister}
+                            {item.registered ? text.terminalReregister : text.terminalRegister}
                           </button>
                           <button
                             className="settings-action muted"

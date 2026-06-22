@@ -1303,9 +1303,26 @@ label,
 
 .terminal-shell h4 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 650;
+}
+
+.terminal-badge {
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  background: var(--hover);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.terminal-badge.ok {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .terminal-shell p {
