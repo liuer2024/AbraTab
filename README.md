@@ -33,11 +33,20 @@ cargo run --bin abratab-cli -- expand dlog
 
 ## zsh Tab expansion
 
-Add this to `~/.zshrc`:
+Install the zsh integration:
 
-```zsh
-source /Users/smiler/Documents/98_personal/abraTab/scripts/abratab.zsh
+```bash
+./scripts/install-zsh-integration.sh
 ```
 
 Then restart the terminal or run `source ~/.zshrc`. Typing `dlog` and pressing
 Tab expands it to the snippet body when `dlog` is an enabled shortcut.
+
+The installer writes a marked block to `~/.zshrc`, sets `ABRATAB_ROOT`, and uses
+the built `abratab-cli` binary instead of running Cargo on every Tab press.
+
+Uninstall:
+
+```bash
+./scripts/uninstall-zsh-integration.sh
+```
