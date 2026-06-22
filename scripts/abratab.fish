@@ -37,4 +37,25 @@ function _abratab_expand_or_complete
     commandline -f complete
 end
 
+function _abratab_pick
+    if not command -q fzf
+        commandline -f repaint
+        echo "AbraTab search needs fzf" >&2
+        return 0
+    end
+
+    set -l query (commandline)
+    set -l picked (_abratab_cli search "$query" 2>/dev/null | fzf --query "$query" --prompt "AbraTab> " --height 40% --reverse)
+    set -l id (string split \t -- "$picked")[1]
+
+    if test -n "$id"
+        set -l body (_abratab_cli print "$id" 2>/dev/null)
+        if test -n "$body"
+            commandline -- "$body"
+            commandline -C (string length -- "$body")
+        end
+    end
+end
+
 bind \t _abratab_expand_or_complete
+bind \cg _abratab_pick

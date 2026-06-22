@@ -40,4 +40,24 @@ _abratab_expand_or_complete() {
   READLINE_POINT=$((READLINE_POINT + 1))
 }
 
+_abratab_pick() {
+  if ! command -v fzf >/dev/null 2>&1; then
+    printf "\nAbraTab search needs fzf\n" >&2
+    return 0
+  fi
+
+  local picked id body
+  picked="$(_abratab_cli search "$READLINE_LINE" 2>/dev/null | fzf --query "$READLINE_LINE" --prompt "AbraTab> " --height 40% --reverse)"
+  id="${picked%%$'\t'*}"
+
+  if [[ -n "$id" ]]; then
+    body="$(_abratab_cli print "$id" 2>/dev/null)"
+    if [[ -n "$body" ]]; then
+      READLINE_LINE="$body"
+      READLINE_POINT=${#READLINE_LINE}
+    fi
+  fi
+}
+
 bind -x '"\t": _abratab_expand_or_complete'
+bind -x '"\C-g": _abratab_pick'

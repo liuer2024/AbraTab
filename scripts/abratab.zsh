@@ -39,5 +39,30 @@ _abratab_expand_or_complete() {
   zle expand-or-complete
 }
 
+_abratab_pick() {
+  emulate -L zsh
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    zle -M "AbraTab search needs fzf"
+    return 0
+  fi
+
+  local query="${BUFFER}"
+  local picked id body
+  picked="$(_abratab_cli search "$query" 2>/dev/null | fzf --query "$query" --prompt "AbraTab> " --height 40% --reverse)"
+  id="${picked%%$'\t'*}"
+
+  if [[ -n "$id" ]]; then
+    body="$(_abratab_cli print "$id" 2>/dev/null)"
+    if [[ -n "$body" ]]; then
+      BUFFER="$body"
+      CURSOR=${#BUFFER}
+      zle redisplay
+    fi
+  fi
+}
+
 zle -N _abratab_expand_or_complete
+zle -N _abratab_pick
 bindkey '^I' _abratab_expand_or_complete
+bindkey '^G' _abratab_pick

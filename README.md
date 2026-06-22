@@ -9,7 +9,7 @@ AbraTab is a local terminal snippet manager built with Tauri, React, Rust, and S
 - Snippet fields: title, body, description, category, tags, shortcut, shell, enabled.
 - Simple `{{variable}}` placeholder highlighting in the editor.
 - CLI entry for listing, searching, printing, copying, adding, and removing snippets.
-- zsh Tab expansion for snippet shortcuts through `scripts/abratab.zsh`.
+- zsh/bash/fish Tab expansion and Ctrl+G search for snippet shortcuts.
 
 ## Development
 
@@ -31,7 +31,7 @@ cargo run --bin abratab-cli -- copy <id>
 cargo run --bin abratab-cli -- expand dlog
 ```
 
-## zsh Tab expansion
+## Shell expansion and search
 
 Recommended: open AbraTab Settings -> Terminal, then use Register for zsh,
 bash, or fish.
@@ -44,6 +44,10 @@ Install the zsh integration:
 
 Then restart the terminal or run `source ~/.zshrc`. Typing `dlog` and pressing
 Tab expands it to the snippet body when `dlog` is an enabled shortcut.
+
+Press `Ctrl+G` in the terminal to search snippets with `fzf` and replace the
+current command line with the selected snippet body. In iTerm2, `Command+G` is
+an app shortcut by default; map it to send `Ctrl+G` if you want that key.
 
 The installer writes a marked block to `~/.zshrc`, sets `ABRATAB_ROOT`, and uses
 the built `abratab-cli` binary instead of running Cargo on every Tab press.
