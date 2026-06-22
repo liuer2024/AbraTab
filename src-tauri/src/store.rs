@@ -10,7 +10,9 @@ pub fn default_db_path() -> Result<PathBuf> {
     let base = dirs::data_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
         .context("could not find a data directory")?;
-    Ok(base.join("abratab").join("abratab.db"))
+    let path = base.join("AbraTab").join("AbraTab.db");
+    migrate_legacy_db_path(&base, &path);
+    Ok(path)
 }
 
 pub struct Store {
@@ -329,6 +331,27 @@ impl Store {
 
 fn fallback_db_path() -> Result<PathBuf> {
     Ok(env::current_dir()?.join(".abratab").join("abratab.db"))
+}
+
+fn migrate_legacy_db_path(base: &PathBuf, path: &PathBuf) {
+    if path.exists() {
+        return;
+    }
+
+    let legacy_path = base.join("abratab").join("abratab.db");
+    if !legacy_path.exists() {
+        return;
+    }
+
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+
+    if fs::rename(&legacy_path, path).is_err() {
+        let _ = fs::copy(&legacy_path, path);
+    }
 }
 
 fn row_to_snippet(row: &rusqlite::Row<'_>) -> rusqlite::Result<Snippet> {
