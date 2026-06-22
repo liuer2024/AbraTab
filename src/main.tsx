@@ -1170,13 +1170,15 @@ function App() {
                       <span className={`terminal-badge ${terminalDependency?.fzf_installed ? "ok" : ""}`}>
                         {terminalDependency?.fzf_installed ? text.terminalFzfInstalled : text.terminalFzfMissing}
                       </span>
-                      <button
-                        className="settings-action"
-                        onClick={() => void installFzf().catch(showError)}
-                        disabled={!terminalDependency?.homebrew_installed || terminalDependency?.fzf_installed}
-                      >
-                        {text.terminalInstallFzf}
-                      </button>
+                      {!terminalDependency?.fzf_installed ? (
+                        <button
+                          className="settings-action"
+                          onClick={() => void installFzf().catch(showError)}
+                          disabled={!terminalDependency?.homebrew_installed}
+                        >
+                          {text.terminalInstallFzf}
+                        </button>
+                      ) : null}
                       <button className="settings-action muted" onClick={() => void copyFzfInstallCommand().catch(showError)}>
                         {text.terminalCopyInstall}
                       </button>
