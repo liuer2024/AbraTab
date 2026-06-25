@@ -1,6 +1,8 @@
+mod gitee_sync;
 mod models;
 mod store;
 
+use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
 use models::{Snippet, SnippetInput};
 use serde::Serialize;
 use std::fs;
@@ -117,6 +119,29 @@ fn copy_snippet(id: String) -> Result<(), AppError> {
 #[tauri::command]
 fn database_path() -> Result<String, AppError> {
     Ok(store::default_db_path()?.display().to_string())
+}
+
+#[tauri::command]
+fn gitee_sync_status() -> Result<GiteeSyncStatus, AppError> {
+    Ok(gitee_sync::load_status()?)
+}
+
+#[tauri::command]
+fn save_gitee_sync_config(input: GiteeSyncConfigInput) -> Result<GiteeSyncStatus, AppError> {
+    Ok(gitee_sync::save_config(input)?)
+}
+
+#[tauri::command]
+async fn push_gitee_sync() -> Result<GiteePushResult, AppError> {
+    let snapshot = Store::open_default()?.export_snapshot()?;
+    Ok(gitee_sync::push(snapshot).await?)
+}
+
+#[tauri::command]
+async fn pull_gitee_sync() -> Result<GiteePullResult, AppError> {
+    let (gist_id, snapshot) = gitee_sync::pull().await?;
+    let imported = Store::open_default()?.import_snapshot(snapshot)?;
+    Ok(GiteePullResult { gist_id, imported })
 }
 
 #[tauri::command]
@@ -373,6 +398,10 @@ pub fn run() {
             expand_snippet,
             copy_snippet,
             database_path,
+            gitee_sync_status,
+            save_gitee_sync_config,
+            push_gitee_sync,
+            pull_gitee_sync,
             terminal_integration_status,
             terminal_dependency_status,
             install_shell_integration,

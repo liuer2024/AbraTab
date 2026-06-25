@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Code2,
   Database,
+  Download,
   FilePlus2,
   Folder,
   Grid2X2,
@@ -14,11 +15,12 @@ import {
   Monitor,
   Palette,
   Pin,
+  Plus,
   RotateCcw,
   Search,
   Settings,
   Star,
-  Tag,
+  Upload,
   TerminalSquare,
   Trash2,
   Type,
@@ -71,10 +73,17 @@ const blankForm: FormState = {
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
-type SettingsTab = "appearance" | "font" | "window" | "terminal" | "about";
+type SettingsTab = "appearance" | "font" | "window" | "terminal" | "sync" | "about";
 type Locale = "zh" | "en" | "ja";
 type Theme = "graphite" | "notion" | "paper" | "mint" | "dusk" | "midnight";
 type LibraryView = "all" | "favorites" | "trash";
+
+type CategoryNode = {
+  name: string;
+  path: string;
+  count: number;
+  children: CategoryNode[];
+};
 
 type TerminalIntegrationStatus = {
   shell: "zsh" | "bash" | "fish";
@@ -91,15 +100,67 @@ type TerminalDependencyStatus = {
   install_command: string;
 };
 
+type GiteeSyncStatus = {
+  configured: boolean;
+  gist_id: string | null;
+  description: string;
+  public: boolean;
+  config_path: string;
+};
+
+type GiteePullResult = {
+  gist_id: string;
+  imported: {
+    inserted: number;
+    updated: number;
+    skipped: number;
+  };
+};
+
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
   { id: "font", icon: Type },
   { id: "window", icon: Monitor },
   { id: "terminal", icon: TerminalSquare },
+  { id: "sync", icon: Upload },
   { id: "about", icon: Info },
 ];
 
 const themeOptions: Theme[] = ["graphite", "notion", "paper", "mint", "dusk", "midnight"];
+
+function normalizeCategoryPath(category: string | null | undefined) {
+  return (category ?? "")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+}
+
+function buildCategoryTree(snippets: Snippet[]) {
+  const roots = new Map<string, CategoryNode>();
+
+  for (const snippet of snippets) {
+    const category = normalizeCategoryPath(snippet.category);
+    if (!category) continue;
+
+    let level = roots;
+    let path = "";
+    for (const name of category.split("/")) {
+      path = path ? `${path}/${name}` : name;
+      let node = level.get(name);
+      if (!node) {
+        node = { name, path, count: 0, children: [] };
+        level.set(name, node);
+      }
+      node.count += 1;
+      const nextLevel = new Map(node.children.map((child) => [child.name, child]));
+      level = nextLevel;
+      node.children = Array.from(nextLevel.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }
+
+  return Array.from(roots.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
 
 const translations = {
   zh: {
@@ -111,6 +172,8 @@ const translations = {
     trash: "废纸篓",
     categories: "分类",
     tags: "标签",
+    addCategory: "添加分类",
+    addTag: "添加标签",
     newSnippet: "新建片段",
     settings: "设置",
     searchSnippets: "搜索片段...",
@@ -124,6 +187,8 @@ const translations = {
     pin: "置顶",
     unpin: "取消置顶",
     moveCategory: "移动分类",
+    confirm: "确定",
+    cancel: "取消",
     save: "保存",
     trigger: "触发词",
     press: "按",
@@ -149,6 +214,7 @@ const translations = {
       font: "字体",
       window: "窗口",
       terminal: "终端",
+      sync: "同步",
       about: "关于",
     },
     subtitles: {
@@ -156,8 +222,29 @@ const translations = {
       font: "字体和编辑器阅读体验。",
       window: "窗口行为和标题栏。",
       terminal: "注册 shell 集成和快捷词展开。",
+      sync: "用 Gitee 代码片段同步片段、分类和标签。",
       about: "版本和本地存储信息。",
     },
+    giteeToken: "Gitee Token",
+    giteeTokenDetail: "需要可读写代码片段的私人令牌，保存在本机配置文件。",
+    giteeGistId: "代码片段 ID",
+    giteeGistIdDetail: "留空会在首次推送时创建一个新的 Gitee 代码片段。",
+    giteeDescription: "描述",
+    giteeDescriptionDetail: "显示在 Gitee 代码片段列表中的名称。",
+    giteePublic: "公开代码片段",
+    giteePublicDetail: "建议保持关闭。片段内容可能包含命令、地址或密钥。",
+    giteeSave: "保存配置",
+    giteePush: "推送到 Gitee",
+    giteePull: "从 Gitee 拉取",
+    giteeConfigured: "已配置",
+    giteeNotConfigured: "未配置",
+    giteeConfigPath: "配置文件",
+    giteeTokenPlaceholder: "输入 Gitee 私人令牌",
+    giteeGistPlaceholder: "留空自动创建",
+    giteeDescriptionPlaceholder: "AbraTab sync data",
+    giteeSaved: "已保存 Gitee 同步配置。",
+    giteePushed: "已推送到 Gitee",
+    giteePulled: "已从 Gitee 拉取",
     terminalCli: "命令行工具",
     terminalCliDetail: "Tab 展开依赖本地 abratab-cli。",
     terminalBuildCli: "构建/更新 CLI",
@@ -221,6 +308,8 @@ const translations = {
     trash: "Trash",
     categories: "Categories",
     tags: "Tags",
+    addCategory: "Add category",
+    addTag: "Add tag",
     newSnippet: "New snippet",
     settings: "Settings",
     searchSnippets: "Search snippets...",
@@ -234,6 +323,8 @@ const translations = {
     pin: "Pin",
     unpin: "Unpin",
     moveCategory: "Move category",
+    confirm: "OK",
+    cancel: "Cancel",
     save: "Save",
     trigger: "trigger",
     press: "press",
@@ -259,6 +350,7 @@ const translations = {
       font: "Font",
       window: "Window",
       terminal: "Terminal",
+      sync: "Sync",
       about: "About",
     },
     subtitles: {
@@ -266,8 +358,29 @@ const translations = {
       font: "Typeface and editor reading comfort.",
       window: "Window behavior and chrome.",
       terminal: "Register shell integrations and shortcut expansion.",
+      sync: "Sync snippets, categories, and tags through a Gitee gist.",
       about: "Version and local storage details.",
     },
+    giteeToken: "Gitee token",
+    giteeTokenDetail: "A personal token with gist read/write access, stored in a local config file.",
+    giteeGistId: "Gist ID",
+    giteeGistIdDetail: "Leave empty to create a new Gitee gist on the first push.",
+    giteeDescription: "Description",
+    giteeDescriptionDetail: "Name shown in the Gitee gist list.",
+    giteePublic: "Public gist",
+    giteePublicDetail: "Keep this off. Snippets may contain commands, hosts, or secrets.",
+    giteeSave: "Save config",
+    giteePush: "Push to Gitee",
+    giteePull: "Pull from Gitee",
+    giteeConfigured: "Configured",
+    giteeNotConfigured: "Not configured",
+    giteeConfigPath: "Config file",
+    giteeTokenPlaceholder: "Enter Gitee personal token",
+    giteeGistPlaceholder: "Empty creates one",
+    giteeDescriptionPlaceholder: "AbraTab sync data",
+    giteeSaved: "Saved Gitee sync config.",
+    giteePushed: "Pushed to Gitee",
+    giteePulled: "Pulled from Gitee",
     terminalCli: "CLI",
     terminalCliDetail: "Tab expansion depends on the local abratab-cli binary.",
     terminalBuildCli: "Build / update CLI",
@@ -331,6 +444,8 @@ const translations = {
     trash: "ゴミ箱",
     categories: "カテゴリ",
     tags: "タグ",
+    addCategory: "カテゴリを追加",
+    addTag: "タグを追加",
     newSnippet: "新規スニペット",
     settings: "設定",
     searchSnippets: "スニペットを検索...",
@@ -344,6 +459,8 @@ const translations = {
     pin: "固定",
     unpin: "固定解除",
     moveCategory: "カテゴリ移動",
+    confirm: "OK",
+    cancel: "キャンセル",
     save: "保存",
     trigger: "トリガー",
     press: "押して",
@@ -369,6 +486,7 @@ const translations = {
       font: "フォント",
       window: "ウィンドウ",
       terminal: "ターミナル",
+      sync: "同期",
       about: "情報",
     },
     subtitles: {
@@ -376,8 +494,29 @@ const translations = {
       font: "書体とエディタの読みやすさ。",
       window: "ウィンドウ動作とタイトルバー。",
       terminal: "シェル連携とショートカット展開を登録します。",
+      sync: "Gitee コードスニペットでスニペット、カテゴリ、タグを同期します。",
       about: "バージョンとローカル保存情報。",
     },
+    giteeToken: "Gitee トークン",
+    giteeTokenDetail: "コードスニペットの読み書き権限を持つ個人トークンをローカル設定に保存します。",
+    giteeGistId: "コードスニペット ID",
+    giteeGistIdDetail: "空のまま初回プッシュすると新しい Gitee コードスニペットを作成します。",
+    giteeDescription: "説明",
+    giteeDescriptionDetail: "Gitee のコードスニペット一覧に表示される名前です。",
+    giteePublic: "公開コードスニペット",
+    giteePublicDetail: "オフ推奨です。スニペットにはコマンド、ホスト、秘密情報が含まれる場合があります。",
+    giteeSave: "設定を保存",
+    giteePush: "Gitee へプッシュ",
+    giteePull: "Gitee から取得",
+    giteeConfigured: "設定済み",
+    giteeNotConfigured: "未設定",
+    giteeConfigPath: "設定ファイル",
+    giteeTokenPlaceholder: "Gitee 個人トークンを入力",
+    giteeGistPlaceholder: "空なら自動作成",
+    giteeDescriptionPlaceholder: "AbraTab sync data",
+    giteeSaved: "Gitee 同期設定を保存しました。",
+    giteePushed: "Gitee へプッシュしました",
+    giteePulled: "Gitee から取得しました",
     terminalCli: "CLI",
     terminalCliDetail: "Tab 展開にはローカルの abratab-cli が必要です。",
     terminalBuildCli: "CLI をビルド/更新",
@@ -441,6 +580,7 @@ function App() {
   const [activeView, setActiveView] = useState<LibraryView>("all");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
   const [form, setForm] = useState<FormState>(blankForm);
   const [dbPath, setDbPath] = useState("");
   const [status, setStatus] = useState("");
@@ -451,8 +591,15 @@ function App() {
   const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
   const [terminalDependency, setTerminalDependency] = useState<TerminalDependencyStatus | null>(null);
   const [terminalMessage, setTerminalMessage] = useState("");
+  const [giteeStatus, setGiteeStatus] = useState<GiteeSyncStatus | null>(null);
+  const [giteeToken, setGiteeToken] = useState("");
+  const [giteeGistId, setGiteeGistId] = useState("");
+  const [giteeDescription, setGiteeDescription] = useState("AbraTab sync data");
+  const [giteePublic, setGiteePublic] = useState(false);
+  const [giteeMessage, setGiteeMessage] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; snippet: Snippet } | null>(null);
-  const tagsInputRef = useRef<HTMLInputElement>(null);
+  const [textPrompt, setTextPrompt] = useState<{ title: string; value: string } | null>(null);
+  const promptResolver = useRef<((value: string | null) => void) | null>(null);
 
   const selected = snippets.find((snippet) => snippet.id === selectedId) ?? null;
   const liveSnippets = useMemo(() => snippets.filter((snippet) => !snippet.deleted_at), [snippets]);
@@ -469,11 +616,13 @@ function App() {
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const snippet of liveSnippets) {
-      const category = snippet.category || "Uncategorized";
+      const category = normalizeCategoryPath(snippet.category) || "Uncategorized";
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
     return Array.from(counts.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [liveSnippets]);
+
+  const categoryTree = useMemo(() => buildCategoryTree(liveSnippets), [liveSnippets]);
 
   const tags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -490,8 +639,17 @@ function App() {
       }
       if (snippet.deleted_at) return false;
       if (activeView === "favorites" && !snippet.favorite) return false;
-      const category = snippet.category || "Uncategorized";
-      if (activeCategory && category !== activeCategory) return false;
+      const category = normalizeCategoryPath(snippet.category) || "Uncategorized";
+      if (activeCategory) {
+        const normalizedActiveCategory = normalizeCategoryPath(activeCategory) || "Uncategorized";
+        if (
+          normalizedActiveCategory === "Uncategorized"
+            ? category !== "Uncategorized"
+            : category !== normalizedActiveCategory && !category.startsWith(`${normalizedActiveCategory}/`)
+        ) {
+          return false;
+        }
+      }
       if (activeTag && !snippet.tags.includes(activeTag)) return false;
       return true;
     });
@@ -507,6 +665,26 @@ function App() {
       void refreshTerminalStatus();
     }
   }, [settingsOpen, settingsTab]);
+
+  useEffect(() => {
+    if (settingsOpen && settingsTab === "sync") {
+      void refreshGiteeStatus();
+    }
+  }, [settingsOpen, settingsTab]);
+
+  useEffect(() => {
+    const category = normalizeCategoryPath(activeCategory);
+    if (!category || category === "Uncategorized") return;
+
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      const parts = category.split("/");
+      for (let index = 1; index <= parts.length; index += 1) {
+        next.add(parts.slice(0, index).join("/"));
+      }
+      return next;
+    });
+  }, [activeCategory]);
 
   async function refresh(nextQuery = query) {
     const rows = await invoke<Snippet[]>("list_snippets", {
@@ -546,8 +724,40 @@ function App() {
     setForm({
       ...blankForm,
       favorite: activeView === "favorites",
-      category: activeCategory && activeCategory !== "Uncategorized" ? activeCategory : "",
+      category: activeCategory && activeCategory !== "Uncategorized" ? normalizeCategoryPath(activeCategory) : "",
       tagsText: activeTag ?? "",
+    });
+  }
+
+  async function addCategory() {
+    const parent = activeCategory && activeCategory !== "Uncategorized" ? `${normalizeCategoryPath(activeCategory)}/` : "";
+    const category = await askText(text.addCategory, parent);
+    const name = category?.trim();
+    if (!name) return;
+    const path = normalizeCategoryPath(name);
+
+    setSelectedId(null);
+    setActiveView("all");
+    setActiveCategory(path);
+    setActiveTag(null);
+    setForm({
+      ...blankForm,
+      category: path,
+    });
+  }
+
+  async function addTag() {
+    const tag = await askText(text.addTag);
+    const name = tag?.trim();
+    if (!name) return;
+
+    setSelectedId(null);
+    setActiveView("all");
+    setActiveCategory(null);
+    setActiveTag(name);
+    setForm({
+      ...blankForm,
+      tagsText: name,
     });
   }
 
@@ -563,7 +773,7 @@ function App() {
         title: form.title,
         body: form.body,
         description: form.description,
-        category: form.category,
+        category: normalizeCategoryPath(form.category),
         tags: form.tagsText
           .split(",")
           .map((tag) => tag.trim())
@@ -618,7 +828,7 @@ function App() {
   }
 
   async function moveCategory(snippet: Snippet) {
-    const category = window.prompt(text.moveCategory, snippet.category || "");
+    const category = await askText(text.moveCategory, snippet.category || "");
     if (category === null) return;
     await invoke("move_snippet_category", { id: snippet.id, category });
     setContextMenu(null);
@@ -663,8 +873,108 @@ function App() {
     setActiveTag(null);
   }
 
+  function selectCategory(category: string) {
+    setActiveView("all");
+    setActiveCategory(category);
+    setActiveTag(null);
+  }
+
+  function toggleCategory(category: string) {
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }
+
+  function renderCategoryNode(node: CategoryNode, depth = 0): React.ReactNode {
+    const isExpanded = expandedCategories.has(node.path);
+    const hasChildren = node.children.length > 0;
+    const isActive = activeView === "all" && activeCategory === node.path;
+
+    return (
+      <React.Fragment key={node.path}>
+        <div className="folder-tree-row" style={{ "--depth": depth } as React.CSSProperties}>
+          <button
+            className={`folder-toggle ${isExpanded ? "expanded" : ""}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (hasChildren) toggleCategory(node.path);
+            }}
+            disabled={!hasChildren}
+            aria-label={node.name}
+          >
+            <ChevronRight size={13} />
+          </button>
+          <button className={`folder-row ${isActive ? "on" : ""}`} onClick={() => selectCategory(node.path)}>
+            <Folder size={15} />
+            <span>{node.name}</span>
+            <b>{node.count}</b>
+          </button>
+        </div>
+        {hasChildren && isExpanded ? node.children.map((child) => renderCategoryNode(child, depth + 1)) : null}
+      </React.Fragment>
+    );
+  }
+
   function showError(error: unknown) {
     setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  function askText(title: string, defaultValue = ""): Promise<string | null> {
+    return new Promise((resolve) => {
+      promptResolver.current = resolve;
+      setTextPrompt({ title, value: defaultValue });
+    });
+  }
+
+  function resolvePrompt(result: string | null) {
+    const resolve = promptResolver.current;
+    promptResolver.current = null;
+    setTextPrompt(null);
+    resolve?.(result);
+  }
+
+  async function refreshGiteeStatus() {
+    const syncStatus = await invoke<GiteeSyncStatus>("gitee_sync_status");
+    setGiteeStatus(syncStatus);
+    setGiteeGistId(syncStatus.gist_id ?? "");
+    setGiteeDescription(syncStatus.description || "AbraTab sync data");
+    setGiteePublic(syncStatus.public);
+  }
+
+  async function saveGiteeSyncConfig() {
+    const syncStatus = await invoke<GiteeSyncStatus>("save_gitee_sync_config", {
+      input: {
+        accessToken: giteeToken,
+        gistId: giteeGistId,
+        description: giteeDescription,
+        public: giteePublic,
+      },
+    });
+    setGiteeToken("");
+    setGiteeStatus(syncStatus);
+    setGiteeGistId(syncStatus.gist_id ?? "");
+    setGiteeMessage(text.giteeSaved);
+  }
+
+  async function pushGiteeSync() {
+    const result = await invoke<{ gist_id: string; snippet_count: number }>("push_gitee_sync");
+    setGiteeGistId(result.gist_id);
+    setGiteeMessage(`${text.giteePushed}: ${result.snippet_count} ${text.snippets}`);
+    await refreshGiteeStatus();
+  }
+
+  async function pullGiteeSync() {
+    const result = await invoke<GiteePullResult>("pull_gitee_sync");
+    const { inserted, updated, skipped } = result.imported;
+    setGiteeMessage(`${text.giteePulled}: +${inserted}, ~${updated}, =${skipped}`);
+    await refresh();
+    await refreshGiteeStatus();
   }
 
   async function refreshTerminalStatus() {
@@ -761,27 +1071,20 @@ function App() {
             <b>{deletedSnippets.length}</b>
           </button>
 
-          <div className="nav-section">{text.categories}</div>
-          {categories
-            .filter(([name]) => name !== "Uncategorized")
-            .map(([name, count]) => (
-              <button
-                key={name}
-                className={`folder-row ${activeView === "all" && activeCategory === name ? "on" : ""}`}
-                onClick={() => {
-                  setActiveView("all");
-                  setActiveCategory(name);
-                  setActiveTag(null);
-                }}
-              >
-                <ChevronRight size={13} />
-                <Folder size={15} />
-                <span>{name}</span>
-                <b>{count}</b>
-              </button>
-            ))}
+          <div className="nav-section-row">
+            <div className="nav-section">{text.categories}</div>
+            <button className="nav-section-add" title={text.addCategory} onClick={() => void addCategory().catch(showError)}>
+              <Plus size={13} />
+            </button>
+          </div>
+          {categoryTree.map((node) => renderCategoryNode(node))}
 
-          <div className="nav-section">{text.tags}</div>
+          <div className="nav-section-row">
+            <div className="nav-section">{text.tags}</div>
+            <button className="nav-section-add" title={text.addTag} onClick={() => void addTag().catch(showError)}>
+              <Plus size={13} />
+            </button>
+          </div>
           {tags.map(([name, count], index) => (
             <button
               key={name}
@@ -891,9 +1194,6 @@ function App() {
             >
               <Star size={16} fill={form.favorite ? "currentColor" : "none"} />
             </button>
-            <button className="icon-button" title={text.tags} onClick={() => tagsInputRef.current?.focus()}>
-              <Tag size={16} />
-            </button>
             {selected?.deleted_at ? (
               <button className="icon-button" title={text.restore} onClick={restore} disabled={!form.id}>
                 <RotateCcw size={16} />
@@ -934,15 +1234,16 @@ function App() {
                 value={form.category}
                 onChange={(event) => setForm({ ...form, category: event.target.value })}
                 placeholder="API"
+                list="category-options"
               />
             </label>
             <label>
               <span>{text.tags}</span>
               <input
-                ref={tagsInputRef}
                 value={form.tagsText}
                 onChange={(event) => setForm({ ...form, tagsText: event.target.value })}
                 placeholder="curl, api"
+                list="tag-options"
               />
             </label>
             <label>
@@ -964,6 +1265,19 @@ function App() {
               placeholder={text.descriptionPlaceholder}
             />
           </label>
+
+          <datalist id="category-options">
+            {categories
+              .filter(([name]) => name !== "Uncategorized")
+              .map(([name]) => (
+                <option value={name} key={name} />
+              ))}
+          </datalist>
+          <datalist id="tag-options">
+            {tags.map(([name]) => (
+              <option value={name} key={name} />
+            ))}
+          </datalist>
 
           <div className="code-card">
             <div className="code-top">
@@ -1230,6 +1544,83 @@ function App() {
                 </div>
               ) : null}
 
+              {settingsTab === "sync" ? (
+                <div className="settings-section sync-panel">
+                  <SettingRow title={text.giteeToken} detail={text.giteeTokenDetail}>
+                    <input
+                      className="settings-input"
+                      type="password"
+                      value={giteeToken}
+                      placeholder={giteeStatus?.configured ? "••••••••••••" : text.giteeTokenPlaceholder}
+                      onChange={(event) => setGiteeToken(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.giteeGistId} detail={text.giteeGistIdDetail}>
+                    <input
+                      className="settings-input"
+                      value={giteeGistId}
+                      placeholder={text.giteeGistPlaceholder}
+                      onChange={(event) => setGiteeGistId(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.giteeDescription} detail={text.giteeDescriptionDetail}>
+                    <input
+                      className="settings-input"
+                      value={giteeDescription}
+                      placeholder={text.giteeDescriptionPlaceholder}
+                      onChange={(event) => setGiteeDescription(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.giteePublic} detail={text.giteePublicDetail}>
+                    <label className="settings-switch">
+                      <input
+                        type="checkbox"
+                        checked={giteePublic}
+                        onChange={(event) => setGiteePublic(event.target.checked)}
+                      />
+                      <span />
+                    </label>
+                  </SettingRow>
+
+                  <div className="sync-actions">
+                    <button
+                      className="settings-action"
+                      disabled={!giteeToken.trim() && !giteeStatus?.configured}
+                      onClick={() => void saveGiteeSyncConfig().catch(showError)}
+                    >
+                      <Check size={14} />
+                      <span>{text.giteeSave}</span>
+                    </button>
+                    <button
+                      className="settings-action"
+                      disabled={!giteeStatus?.configured}
+                      onClick={() => void pushGiteeSync().catch(showError)}
+                    >
+                      <Upload size={14} />
+                      <span>{text.giteePush}</span>
+                    </button>
+                    <button
+                      className="settings-action muted"
+                      disabled={!giteeStatus?.configured || !giteeGistId.trim()}
+                      onClick={() => void pullGiteeSync().catch(showError)}
+                    >
+                      <Download size={14} />
+                      <span>{text.giteePull}</span>
+                    </button>
+                  </div>
+
+                  <div className="sync-status">
+                    <span className={`terminal-badge ${giteeStatus?.configured ? "ok" : ""}`}>
+                      {giteeStatus?.configured ? text.giteeConfigured : text.giteeNotConfigured}
+                    </span>
+                    <span>{giteeMessage || `${text.giteeConfigPath}: ${giteeStatus?.config_path ?? text.loading}`}</span>
+                  </div>
+                </div>
+              ) : null}
+
               {settingsTab === "about" ? (
                 <div className="settings-section about-panel">
                   <div className="about-logo">
@@ -1273,6 +1664,43 @@ function App() {
             <Trash2 size={14} />
             <span>{text.delete}</span>
           </button>
+        </div>
+      ) : null}
+
+      {textPrompt ? (
+        <div className="prompt-overlay" role="presentation" onMouseDown={() => resolvePrompt(null)}>
+          <form
+            className="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={textPrompt.title}
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              resolvePrompt(textPrompt.value);
+            }}
+          >
+            <h3>{textPrompt.title}</h3>
+            <input
+              autoFocus
+              value={textPrompt.value}
+              onChange={(event) => setTextPrompt({ title: textPrompt.title, value: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  resolvePrompt(null);
+                }
+              }}
+            />
+            <div className="prompt-actions">
+              <button type="button" className="prompt-cancel" onClick={() => resolvePrompt(null)}>
+                {text.cancel}
+              </button>
+              <button type="submit" className="prompt-confirm">
+                {text.confirm}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
     </main>

@@ -228,6 +228,83 @@ impl Store {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
+        Ok(SyncSnapshot {
+            schema: 1,
+            client: "AbraTab".to_string(),
+            exported_at: now_string(),
+            snippets: self.list(None, true)?,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
+        if snapshot.schema != 1 {
+            anyhow::bail!("unsupported sync schema {}", snapshot.schema);
+        }
+
+        let mut result = SyncImportResult::default();
+        for snippet in snapshot.snippets {
+            match self.get(&snippet.id)? {
+                Some(existing) if existing.updated_at >= snippet.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_snippet(&snippet)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_snippet(&snippet)?;
+                    result.inserted += 1;
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_snippet(&self, snippet: &Snippet) -> Result<()> {
+        let tags = serde_json::to_string(&snippet.tags)?;
+        self.conn.execute(
+            r#"
+            INSERT INTO snippets (id, title, body, description, category, tags, shortcut, shell, enabled, favorite, pinned, deleted_at, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                body = excluded.body,
+                description = excluded.description,
+                category = excluded.category,
+                tags = excluded.tags,
+                shortcut = excluded.shortcut,
+                shell = excluded.shell,
+                enabled = excluded.enabled,
+                favorite = excluded.favorite,
+                pinned = excluded.pinned,
+                deleted_at = excluded.deleted_at,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                snippet.id,
+                snippet.title,
+                snippet.body,
+                snippet.description,
+                snippet.category,
+                tags,
+                snippet.shortcut,
+                snippet.shell,
+                snippet.enabled,
+                snippet.favorite,
+                snippet.pinned,
+                snippet.deleted_at,
+                snippet.created_at,
+                snippet.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     fn migrate(&self) -> Result<()> {
         self.conn.execute_batch(
             r#"
@@ -256,61 +333,6 @@ impl Store {
         self.add_column_if_missing("snippets", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
         self.add_column_if_missing("snippets", "deleted_at", "TEXT")?;
 
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM snippets", [], |row| row.get(0))?;
-        if count == 0 {
-            self.seed()?;
-        }
-        Ok(())
-    }
-
-    fn seed(&self) -> Result<()> {
-        let examples = [
-            SnippetInput {
-                id: None,
-                title: "Docker follow logs".into(),
-                body: "docker logs -f {{container}}".into(),
-                description: Some("Follow a running container log stream.".into()),
-                category: Some("Docker".into()),
-                tags: Some(vec!["docker".into(), "logs".into()]),
-                shortcut: Some("dlog".into()),
-                shell: Some("any".into()),
-                enabled: Some(true),
-                favorite: Some(false),
-                pinned: Some(false),
-            },
-            SnippetInput {
-                id: None,
-                title: "Git feature branch".into(),
-                body: "git checkout -b feature/{{branch_name}}".into(),
-                description: Some("Create and switch to a feature branch.".into()),
-                category: Some("Git".into()),
-                tags: Some(vec!["git".into(), "branch".into()]),
-                shortcut: Some("gfb".into()),
-                shell: Some("any".into()),
-                enabled: Some(true),
-                favorite: Some(false),
-                pinned: Some(false),
-            },
-            SnippetInput {
-                id: None,
-                title: "HTTP JSON POST".into(),
-                body: "curl -X POST {{url}} \\\n  -H \"Content-Type: application/json\" \\\n  -d '{{json}}'".into(),
-                description: Some("POST JSON with curl.".into()),
-                category: Some("API".into()),
-                tags: Some(vec!["curl".into(), "api".into()]),
-                shortcut: Some("cpost".into()),
-                shell: Some("any".into()),
-                enabled: Some(true),
-                favorite: Some(true),
-                pinned: Some(true),
-            },
-        ];
-
-        for example in examples {
-            self.save(example)?;
-        }
         Ok(())
     }
 
@@ -384,4 +406,21 @@ fn now_string() -> String {
 fn new_id() -> String {
     let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
     format!("snip_{nanos:x}")
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct SyncSnapshot {
+    pub schema: u16,
+    pub client: String,
+    pub exported_at: String,
+    pub snippets: Vec<Snippet>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[allow(dead_code)]
+pub struct SyncImportResult {
+    pub inserted: usize,
+    pub updated: usize,
+    pub skipped: usize,
 }
