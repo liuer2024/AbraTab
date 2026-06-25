@@ -3,7 +3,7 @@ mod models;
 mod store;
 
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
-use models::{Snippet, SnippetInput};
+use models::{Idea, IdeaInput, Snippet, SnippetInput, WeekLog, WeekLogInput};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -23,6 +23,13 @@ struct ShellIntegrationStatus {
     registered: bool,
     cli_path: String,
     cli_built: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CurrentWeek {
+    week_key: String,
+    week_start: String,
+    week_end: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +126,54 @@ fn copy_snippet(id: String) -> Result<(), AppError> {
 #[tauri::command]
 fn database_path() -> Result<String, AppError> {
     Ok(store::default_db_path()?.display().to_string())
+}
+
+#[tauri::command]
+fn list_week_logs(query: Option<String>) -> Result<Vec<WeekLog>, AppError> {
+    Ok(Store::open_default()?.list_week_logs(query.as_deref())?)
+}
+
+#[tauri::command]
+fn save_week_log(input: WeekLogInput) -> Result<WeekLog, AppError> {
+    Ok(Store::open_default()?.save_week_log(input)?)
+}
+
+#[tauri::command]
+fn delete_week_log(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_week_log(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn current_week() -> Result<CurrentWeek, AppError> {
+    let (week_key, week_start, week_end) = store::current_week_fields()?;
+    Ok(CurrentWeek {
+        week_key,
+        week_start,
+        week_end,
+    })
+}
+
+#[tauri::command]
+fn list_ideas(query: Option<String>) -> Result<Vec<Idea>, AppError> {
+    Ok(Store::open_default()?.list_ideas(query.as_deref())?)
+}
+
+#[tauri::command]
+fn save_idea(input: IdeaInput) -> Result<Idea, AppError> {
+    Ok(Store::open_default()?.save_idea(input)?)
+}
+
+#[tauri::command]
+fn set_idea_pinned(id: String, pinned: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_idea_pinned(&id, pinned)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_idea(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_idea(&id)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -398,6 +453,14 @@ pub fn run() {
             expand_snippet,
             copy_snippet,
             database_path,
+            list_week_logs,
+            save_week_log,
+            delete_week_log,
+            current_week,
+            list_ideas,
+            save_idea,
+            set_idea_pinned,
+            delete_idea,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,

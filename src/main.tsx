@@ -3,6 +3,9 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  CalendarDays,
+  CalendarPlus,
+  CalendarRange,
   Check,
   ChevronRight,
   Code2,
@@ -13,12 +16,14 @@ import {
   Grid2X2,
   Info,
   Monitor,
+  NotebookText,
   Palette,
   Pin,
   Plus,
   RotateCcw,
   Search,
   Settings,
+  Sparkles,
   Star,
   Upload,
   TerminalSquare,
@@ -116,6 +121,54 @@ type GiteePullResult = {
     skipped: number;
   };
 };
+
+type Workspace = "snippets" | "journal";
+type JournalMode = "weeklog" | "idea";
+
+type WeekLog = {
+  id: string;
+  week_key: string;
+  week_start: string;
+  week_end: string;
+  title: string;
+  body: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+type CurrentWeek = {
+  week_key: string;
+  week_start: string;
+  week_end: string;
+};
+
+type WeekForm = {
+  id?: string;
+  week_key: string;
+  week_start: string;
+  week_end: string;
+  title: string;
+  body: string;
+};
+
+type Idea = {
+  id: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type IdeaForm = {
+  id?: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+};
+
+const localeTags: Record<Locale, string> = { zh: "zh-CN", en: "en-US", ja: "ja-JP" };
 
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
@@ -298,6 +351,33 @@ const translations = {
     version: "版本",
     database: "数据库",
     loading: "加载中...",
+    wsSnippets: "片段",
+    wsJournal: "札记",
+    wsWeeklog: "周记",
+    wsWeeklogUnit: "篇周记",
+    timeline: "时间线",
+    allWeeklogs: "全部周记",
+    thisWeek: "本周",
+    searchWeeklogs: "搜索周记...",
+    noWeeklogs: "还没有周记",
+    weeklogTitlePlaceholder: "标题（可选）",
+    weeklogBodyPlaceholder: "记录这一周做了什么、遇到了什么、下周打算做什么…",
+    weeklogPickHint: "从左侧选择一周，或点击「本周」开始记录。",
+    weeklogSaved: "已保存周记",
+    weeklogDeleted: "已删除周记",
+    weeklogEmpty: "请先填写标题或内容。",
+    wsIdea: "奇思妙想",
+    ideaUnit: "个想法",
+    allIdeas: "全部想法",
+    pinnedIdeas: "已置顶",
+    newIdea: "新想法",
+    searchIdeas: "搜索想法...",
+    noIdeas: "还没有想法，记下第一个吧。",
+    ideaTitlePlaceholder: "标题（可选）",
+    ideaBodyPlaceholder: "写下你的奇思妙想…",
+    ideaPickHint: "从左侧选择一个想法，或点「新想法」开始。",
+    ideaSaved: "已保存想法",
+    ideaDeleted: "已删除想法",
   },
   en: {
     snippets: "snippets",
@@ -434,6 +514,33 @@ const translations = {
     version: "Version",
     database: "Database",
     loading: "Loading...",
+    wsSnippets: "Snippets",
+    wsJournal: "Notes",
+    wsWeeklog: "Weekly log",
+    wsWeeklogUnit: "logs",
+    timeline: "Timeline",
+    allWeeklogs: "All logs",
+    thisWeek: "This week",
+    searchWeeklogs: "Search logs...",
+    noWeeklogs: "No weekly logs yet",
+    weeklogTitlePlaceholder: "Title (optional)",
+    weeklogBodyPlaceholder: "What you did this week, what came up, what's next…",
+    weeklogPickHint: "Pick a week on the left, or hit This week to start.",
+    weeklogSaved: "Saved weekly log",
+    weeklogDeleted: "Deleted weekly log",
+    weeklogEmpty: "Add a title or some content first.",
+    wsIdea: "Ideas",
+    ideaUnit: "ideas",
+    allIdeas: "All ideas",
+    pinnedIdeas: "Pinned",
+    newIdea: "New idea",
+    searchIdeas: "Search ideas...",
+    noIdeas: "No ideas yet — capture your first.",
+    ideaTitlePlaceholder: "Title (optional)",
+    ideaBodyPlaceholder: "Jot down your idea…",
+    ideaPickHint: "Pick an idea on the left, or hit New idea.",
+    ideaSaved: "Saved idea",
+    ideaDeleted: "Deleted idea",
   },
   ja: {
     snippets: "スニペット",
@@ -570,6 +677,33 @@ const translations = {
     version: "バージョン",
     database: "データベース",
     loading: "読み込み中...",
+    wsSnippets: "スニペット",
+    wsJournal: "雑記",
+    wsWeeklog: "週次ログ",
+    wsWeeklogUnit: "件",
+    timeline: "タイムライン",
+    allWeeklogs: "すべて",
+    thisWeek: "今週",
+    searchWeeklogs: "週次ログを検索...",
+    noWeeklogs: "週次ログがありません",
+    weeklogTitlePlaceholder: "タイトル（任意）",
+    weeklogBodyPlaceholder: "今週やったこと、起きたこと、来週の予定…",
+    weeklogPickHint: "左から週を選ぶか、「今週」で記録を始めます。",
+    weeklogSaved: "週次ログを保存しました",
+    weeklogDeleted: "週次ログを削除しました",
+    weeklogEmpty: "タイトルか本文を入力してください。",
+    wsIdea: "ひらめき",
+    ideaUnit: "件",
+    allIdeas: "すべて",
+    pinnedIdeas: "ピン留め",
+    newIdea: "新しい着想",
+    searchIdeas: "着想を検索...",
+    noIdeas: "まだ着想がありません。最初の一つを記録しましょう。",
+    ideaTitlePlaceholder: "タイトル（任意）",
+    ideaBodyPlaceholder: "思いついたことを書き留める…",
+    ideaPickHint: "左から選ぶか、「新しい着想」で始めます。",
+    ideaSaved: "着想を保存しました",
+    ideaDeleted: "着想を削除しました",
   },
 } as const;
 
@@ -578,6 +712,8 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeView, setActiveView] = useState<LibraryView>("all");
+  const [workspace, setWorkspace] = useState<Workspace>("snippets");
+  const [journalMode, setJournalMode] = useState<JournalMode>("weeklog");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
@@ -1030,6 +1166,32 @@ function App() {
   return (
     <main className="app-shell" data-theme={theme} onClick={() => setContextMenu(null)}>
       <div className="window-drag-strip" data-tauri-drag-region onMouseDown={startWindowDrag} />
+      {workspace === "journal" && journalMode === "weeklog" ? (
+        <WeekLogWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" ? (
+        <IdeaWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : (
+        <>
       <nav className="nav-panel">
         <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
           <div className="brand-logo">
@@ -1040,6 +1202,8 @@ function App() {
             <p>{liveSnippets.length} {text.snippets}</p>
           </div>
         </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
 
         <div className="nav-scroll">
           <div className="nav-section">{text.library}</div>
@@ -1326,6 +1490,8 @@ function App() {
           <span className="status">{status ? <Check size={13} /> : null}{status}</span>
         </footer>
       </section>
+        </>
+      )}
 
       {settingsOpen ? (
         <div className="settings-overlay" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
@@ -1709,6 +1875,658 @@ function App() {
 
 function settingsSubtitle(tab: SettingsTab, locale: Locale) {
   return translations[locale].subtitles[tab];
+}
+
+type Strings = (typeof translations)[Locale];
+
+function WorkspaceToggle({
+  workspace,
+  setWorkspace,
+  text,
+}: {
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  text: Strings;
+}) {
+  const tabs: Array<{ id: Workspace; label: string; Icon: React.ElementType }> = [
+    { id: "snippets", label: text.wsSnippets, Icon: Code2 },
+    { id: "journal", label: text.wsJournal, Icon: NotebookText },
+  ];
+  return (
+    <div className="workspace-switch" role="tablist">
+      {tabs.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={workspace === id}
+          className={workspace === id ? "on" : ""}
+          onClick={() => setWorkspace(id)}
+        >
+          <Icon size={13} />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function JournalModeNav({
+  mode,
+  setMode,
+  text,
+}: {
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  text: Strings;
+}) {
+  const items: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
+    { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
+    { id: "idea", label: text.wsIdea, Icon: Sparkles },
+  ];
+  return (
+    <>
+      {items.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          className={`nav-item ${mode === id ? "on" : ""}`}
+          onClick={() => setMode(id)}
+        >
+          <Icon size={15} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
+function WeekLogWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [logs, setLogs] = useState<WeekLog[]>([]);
+  const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [form, setForm] = useState<WeekForm | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+
+  const intl = localeTags[locale];
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  function weekNumber(weekKey: string) {
+    const part = weekKey.split("-W")[1];
+    return part ? Number.parseInt(part, 10) : 0;
+  }
+
+  function weekLabel(weekKey: string) {
+    const n = weekNumber(weekKey);
+    if (locale === "en") return `Week ${n}`;
+    if (locale === "ja") return `第${n}週`;
+    return `第${n}周`;
+  }
+
+  function parseDay(value: string) {
+    return new Date(`${value}T00:00:00`);
+  }
+
+  function weekRange(log: { week_start: string; week_end: string }) {
+    if (!log.week_start || !log.week_end) return "";
+    const fmt = new Intl.DateTimeFormat(intl, { month: "numeric", day: "numeric" });
+    return `${fmt.format(parseDay(log.week_start))} – ${fmt.format(parseDay(log.week_end))}`;
+  }
+
+  function monthLabel(value: string) {
+    if (!value) return "";
+    return new Intl.DateTimeFormat(intl, { year: "numeric", month: "long" }).format(parseDay(value));
+  }
+
+  const groups = useMemo(() => {
+    const out: Array<{ label: string; items: WeekLog[] }> = [];
+    for (const log of logs) {
+      const label = monthLabel(log.week_start) || log.week_key;
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.items.push(log);
+      else out.push({ label, items: [log] });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, intl]);
+
+  function loadIntoForm(log: WeekLog) {
+    setSelectedKey(log.week_key);
+    setForm({
+      id: log.id,
+      week_key: log.week_key,
+      week_start: log.week_start,
+      week_end: log.week_end,
+      title: log.title,
+      body: log.body,
+    });
+  }
+
+  function openWeek(week: CurrentWeek, existing: WeekLog[] = logs) {
+    const match = existing.find((log) => log.week_key === week.week_key);
+    if (match) {
+      loadIntoForm(match);
+      return;
+    }
+    setSelectedKey(week.week_key);
+    setForm({
+      week_key: week.week_key,
+      week_start: week.week_start,
+      week_end: week.week_end,
+      title: "",
+      body: "",
+    });
+  }
+
+  async function refresh(nextQuery = query) {
+    const rows = await invoke<WeekLog[]>("list_week_logs", { query: nextQuery.trim() || null });
+    setLogs(rows);
+    return rows;
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const week = await invoke<CurrentWeek>("current_week");
+      setCurrentWeek(week);
+      const rows = await refresh("");
+      const thisWeek = rows.find((log) => log.week_key === week.week_key);
+      if (thisWeek) loadIntoForm(thisWeek);
+      else if (rows.length) loadIntoForm(rows[0]);
+      else openWeek(week, rows);
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openThisWeek() {
+    try {
+      const week = currentWeek ?? (await invoke<CurrentWeek>("current_week"));
+      if (!currentWeek) setCurrentWeek(week);
+      openWeek(week);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function save() {
+    if (!form) return;
+    if (!form.title.trim() && !form.body.trim()) {
+      setStatus(text.weeklogEmpty);
+      return;
+    }
+    try {
+      const saved = await invoke<WeekLog>("save_week_log", {
+        input: {
+          id: form.id,
+          week_key: form.week_key,
+          title: form.title,
+          body: form.body,
+        },
+      });
+      await refresh();
+      loadIntoForm(saved);
+      setStatus(`${text.weeklogSaved} · ${weekLabel(saved.week_key)}`);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove() {
+    if (!form?.id) return;
+    try {
+      await invoke("delete_week_log", { id: form.id });
+      const rows = await refresh();
+      setStatus(text.weeklogDeleted);
+      if (rows.length) loadIntoForm(rows[0]);
+      else {
+        setSelectedKey(null);
+        setForm(null);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <CalendarDays size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>AbraTab</h1>
+            <p>{logs.length} {text.wsWeeklogUnit}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <div className="nav-foot">
+          <button title={text.thisWeek} onClick={() => void openThisWeek()}>
+            <CalendarPlus size={15} />
+          </button>
+          <span>{text.wsWeeklog}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refresh(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchWeeklogs}
+            />
+          </label>
+          <button className="add-button" onClick={() => void openThisWeek()} title={text.thisWeek}>
+            <CalendarPlus size={17} />
+          </button>
+        </div>
+
+        <div className="snippet-list">
+          {groups.map((group) => (
+            <React.Fragment key={group.label}>
+              <div className="weeklog-group">{group.label}</div>
+              {group.items.map((log) => (
+                <button
+                  key={log.id}
+                  className={`snippet-item ${log.week_key === selectedKey ? "selected" : ""}`}
+                  onClick={() => loadIntoForm(log)}
+                >
+                  <div className="snippet-title-row">
+                    {currentWeek && log.week_key === currentWeek.week_key ? <span className="hot">●</span> : null}
+                    <span className="snippet-title">{log.title.trim() || weekLabel(log.week_key)}</span>
+                  </div>
+                  <div className="snippet-meta">
+                    <span className="folder-meta">
+                      <CalendarRange size={11} />
+                      {weekLabel(log.week_key)} · {weekRange(log)}
+                    </span>
+                  </div>
+                  {log.body.trim() ? <div className="weeklog-preview">{log.body.trim().split("\n")[0]}</div> : null}
+                </button>
+              ))}
+            </React.Fragment>
+          ))}
+          {logs.length === 0 ? <div className="empty-list">{text.noWeeklogs}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <CalendarRange size={11} />
+              {form ? `${weekLabel(form.week_key)} · ${weekRange(form)}` : text.wsWeeklog}
+            </div>
+            <input
+              value={form?.title ?? ""}
+              onChange={(event) => form && setForm({ ...form, title: event.target.value })}
+              placeholder={text.weeklogTitlePlaceholder}
+              disabled={!form}
+            />
+          </div>
+          <div className="editor-tools">
+            {form?.id ? (
+              <button className="icon-button" title={text.delete} onClick={() => void remove()}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {form ? (
+            <>
+              <div className="code-card weeklog-card">
+                <div className="code-top">
+                  <span className="code-label">{weekLabel(form.week_key)}</span>
+                  <span className="line-count">{form.body.split("\n").length} {text.lines}</span>
+                </div>
+                <textarea
+                  className="weeklog-textarea"
+                  value={form.body}
+                  onChange={(event) => setForm({ ...form, body: event.target.value })}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+                      event.preventDefault();
+                      void save();
+                    }
+                  }}
+                  placeholder={text.weeklogBodyPlaceholder}
+                  spellCheck={false}
+                />
+              </div>
+
+              <div className="weeklog-actions">
+                <button type="button" className="weeklog-save" onClick={() => void save()}>
+                  <Check size={14} />
+                  {text.save}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="weeklog-empty-editor">{text.weeklogPickHint}</div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <CalendarDays size={13} />
+            {form ? weekLabel(form.week_key) : text.wsWeeklog}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+    </>
+  );
+}
+
+function IdeaWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [form, setForm] = useState<IdeaForm | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+
+  const intl = localeTags[locale];
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  function formatDate(value: string) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat(intl, { month: "short", day: "numeric" }).format(date);
+  }
+
+  function loadIntoForm(idea: Idea) {
+    setSelectedId(idea.id);
+    setForm({ id: idea.id, title: idea.title, body: idea.body, pinned: idea.pinned });
+  }
+
+  function createNew() {
+    setSelectedId(null);
+    setForm({ title: "", body: "", pinned: false });
+  }
+
+  async function refresh(nextQuery = query) {
+    const rows = await invoke<Idea[]>("list_ideas", { query: nextQuery.trim() || null });
+    setIdeas(rows);
+    return rows;
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await refresh("");
+      if (rows.length) loadIntoForm(rows[0]);
+      else createNew();
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save() {
+    if (!form) return;
+    if (!form.title.trim() && !form.body.trim()) {
+      setStatus(text.weeklogEmpty);
+      return;
+    }
+    try {
+      const saved = await invoke<Idea>("save_idea", {
+        input: { id: form.id, title: form.title, body: form.body },
+      });
+      await refresh();
+      loadIntoForm(saved);
+      setStatus(text.ideaSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function togglePinned() {
+    if (!form) return;
+    const next = !form.pinned;
+    setForm({ ...form, pinned: next });
+    if (!form.id) return;
+    try {
+      await invoke("set_idea_pinned", { id: form.id, pinned: next });
+      await refresh();
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove() {
+    if (!form?.id) {
+      if (ideas.length) loadIntoForm(ideas[0]);
+      else createNew();
+      return;
+    }
+    try {
+      await invoke("delete_idea", { id: form.id });
+      const rows = await refresh();
+      setStatus(text.ideaDeleted);
+      if (rows.length) loadIntoForm(rows[0]);
+      else createNew();
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <Sparkles size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>AbraTab</h1>
+            <p>{ideas.length} {text.ideaUnit}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <div className="nav-foot">
+          <button title={text.newIdea} onClick={createNew}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsIdea}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refresh(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchIdeas}
+            />
+          </label>
+          <button className="add-button" onClick={createNew} title={text.newIdea}>
+            <Plus size={17} />
+          </button>
+        </div>
+
+        <div className="snippet-list">
+          {ideas.map((idea) => (
+            <button
+              key={idea.id}
+              className={`snippet-item ${idea.id === selectedId ? "selected" : ""}`}
+              onClick={() => loadIntoForm(idea)}
+            >
+              <div className="snippet-title-row">
+                {idea.pinned ? <Pin size={12} className="pin-mark" /> : null}
+                <span className="snippet-title">
+                  {idea.title.trim() || idea.body.trim().split("\n")[0] || text.untitledSnippet}
+                </span>
+              </div>
+              {idea.body.trim() ? <div className="weeklog-preview">{idea.body.trim().split("\n")[0]}</div> : null}
+              <div className="snippet-meta">
+                <span className="folder-meta">
+                  <Sparkles size={11} />
+                  {formatDate(idea.updated_at)}
+                </span>
+              </div>
+            </button>
+          ))}
+          {ideas.length === 0 ? <div className="empty-list">{text.noIdeas}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <Sparkles size={11} />
+              {text.wsIdea}
+            </div>
+            <input
+              value={form?.title ?? ""}
+              onChange={(event) => form && setForm({ ...form, title: event.target.value })}
+              placeholder={text.ideaTitlePlaceholder}
+              disabled={!form}
+            />
+          </div>
+          <div className="editor-tools">
+            <button
+              className={`icon-button fav ${form?.pinned ? "on" : ""}`}
+              title={form?.pinned ? text.unpin : text.pin}
+              onClick={() => void togglePinned()}
+              disabled={!form}
+            >
+              <Pin size={16} fill={form?.pinned ? "currentColor" : "none"} />
+            </button>
+            {form?.id ? (
+              <button className="icon-button" title={text.delete} onClick={() => void remove()}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {form ? (
+            <>
+              <div className="code-card weeklog-card">
+                <div className="code-top">
+                  <span className="code-label">{text.wsIdea}</span>
+                  <span className="line-count">{form.body.split("\n").length} {text.lines}</span>
+                </div>
+                <textarea
+                  className="weeklog-textarea"
+                  value={form.body}
+                  onChange={(event) => setForm({ ...form, body: event.target.value })}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+                      event.preventDefault();
+                      void save();
+                    }
+                  }}
+                  placeholder={text.ideaBodyPlaceholder}
+                  spellCheck={false}
+                />
+              </div>
+              <div className="weeklog-actions">
+                <button type="button" className="weeklog-save" onClick={() => void save()}>
+                  <Check size={14} />
+                  {text.save}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="weeklog-empty-editor">{text.ideaPickHint}</div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <Sparkles size={13} />
+            {text.wsIdea}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+    </>
+  );
 }
 
 function SettingRow({

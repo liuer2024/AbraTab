@@ -32,3 +32,44 @@ pub struct SnippetInput {
     pub favorite: Option<bool>,
     pub pinned: Option<bool>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeekLog {
+    pub id: String,
+    pub week_key: String,
+    pub week_start: String,
+    pub week_end: String,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct WeekLogInput {
+    pub id: Option<String>,
+    pub week_key: String,
+    pub title: Option<String>,
+    pub body: String,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Idea {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct IdeaInput {
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub body: String,
+}
