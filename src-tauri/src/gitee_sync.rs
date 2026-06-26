@@ -20,7 +20,11 @@ pub struct GiteeSyncConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GiteeSyncConfigInput {
+    // The frontend sends camelCase keys; accept both spellings so the
+    // nested struct deserializes regardless of how Tauri forwards the args.
+    #[serde(alias = "accessToken")]
     pub access_token: String,
+    #[serde(alias = "gistId")]
     pub gist_id: Option<String>,
     pub description: Option<String>,
     pub public: Option<bool>,

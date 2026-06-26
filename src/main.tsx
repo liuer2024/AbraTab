@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  Activity,
   CalendarDays,
   CalendarPlus,
   CalendarRange,
@@ -11,19 +12,21 @@ import {
   Code2,
   Database,
   Download,
+  Eye,
   FilePlus2,
   Folder,
   Grid2X2,
+  ImagePlus,
   Info,
   Monitor,
   NotebookText,
   Palette,
+  Pencil,
   Pin,
   Plus,
   RotateCcw,
   Search,
   Settings,
-  Sparkles,
   Star,
   Upload,
   TerminalSquare,
@@ -78,7 +81,7 @@ const blankForm: FormState = {
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
-type SettingsTab = "appearance" | "font" | "window" | "terminal" | "sync" | "about";
+type SettingsTab = "appearance" | "font" | "window" | "terminal" | "sync" | "images" | "about";
 type Locale = "zh" | "en" | "ja";
 type Theme = "graphite" | "notion" | "paper" | "mint" | "dusk" | "midnight";
 type LibraryView = "all" | "favorites" | "trash";
@@ -122,8 +125,22 @@ type GiteePullResult = {
   };
 };
 
+type QiniuStatus = {
+  configured: boolean;
+  access_key: string;
+  bucket: string;
+  domain: string;
+  up_host: string;
+  config_path: string;
+};
+
+type UploadResult = {
+  url: string;
+  key: string;
+};
+
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "idea";
+type JournalMode = "weeklog" | "track";
 
 type WeekLog = {
   id: string;
@@ -133,6 +150,7 @@ type WeekLog = {
   title: string;
   body: string;
   tags: string[];
+  favorite: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -145,30 +163,150 @@ type CurrentWeek = {
 
 type WeekForm = {
   id?: string;
-  week_key: string;
-  week_start: string;
-  week_end: string;
   title: string;
   body: string;
 };
 
-type Idea = {
+type Track = {
   id: string;
   title: string;
-  body: string;
-  pinned: boolean;
   created_at: string;
   updated_at: string;
+  entry_count: number;
+  last_entry_at: string | null;
 };
 
-type IdeaForm = {
-  id?: string;
-  title: string;
+type TrackEntry = {
+  id: string;
+  track_id: string;
   body: string;
-  pinned: boolean;
+  created_at: string;
 };
 
 const localeTags: Record<Locale, string> = { zh: "zh-CN", en: "en-US", ja: "ja-JP" };
+
+const DEFAULT_WORKSPACE_KEY = "abratab.defaultWorkspace";
+
+function readDefaultWorkspace(): Workspace {
+  try {
+    return localStorage.getItem(DEFAULT_WORKSPACE_KEY) === "journal" ? "journal" : "snippets";
+  } catch {
+    return "snippets";
+  }
+}
+
+function writeDefaultWorkspace(value: Workspace) {
+  try {
+    localStorage.setItem(DEFAULT_WORKSPACE_KEY, value);
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Only allow URLs we can safely drop into an href/src attribute.
+function safeUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|data:image\/|\/)/i.test(trimmed)) return trimmed;
+  return null;
+}
+
+// Minimal, dependency-free Markdown → safe HTML for the weeklog preview.
+// Input is HTML-escaped first, so every replacement below operates on inert text.
+function renderMarkdown(source: string): string {
+  const blocks = source.replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const html = blocks.map((block) => {
+    const trimmed = block.trim();
+    if (!trimmed) return "";
+
+    // Standalone image: render large, not inside a paragraph.
+    const loneImage = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    if (loneImage) {
+      const src = safeUrl(loneImage[2]);
+      if (src) {
+        return `<p class="md-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(loneImage[1])}" /></p>`;
+      }
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      return `<h${level}>${inlineMarkdown(heading[2])}</h${level}>`;
+    }
+
+    const lines = trimmed.split("\n");
+    if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
+      const items = lines
+        .map((line) => `<li>${inlineMarkdown(line.replace(/^\s*[-*]\s+/, ""))}</li>`)
+        .join("");
+      return `<ul>${items}</ul>`;
+    }
+
+    return `<p>${lines.map(inlineMarkdown).join("<br />")}</p>`;
+  });
+  return html.filter(Boolean).join("");
+}
+
+function inlineMarkdown(text: string): string {
+  let out = escapeHtml(text);
+  // Images: ![alt](url)
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, url) => {
+    const src = safeUrl(url);
+    return src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" />` : match;
+  });
+  // Links: [text](url)
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
+    const href = safeUrl(url);
+    return href
+      ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${label}</a>`
+      : match;
+  });
+  // Inline code, bold, italic.
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  out = out.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+  return out;
+}
+
+// Pull the first image off a clipboard paste, if any.
+function clipboardImage(event: React.ClipboardEvent): File | null {
+  const items = event.clipboardData?.items;
+  if (!items) return null;
+  for (const item of items) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return null;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("could not read image"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function imageFilename(file: File): string {
+  if (file.name && file.name.includes(".")) return file.name;
+  const ext = file.type.split("/")[1] || "png";
+  return `pasted.${ext}`;
+}
 
 const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
@@ -176,6 +314,7 @@ const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "window", icon: Monitor },
   { id: "terminal", icon: TerminalSquare },
   { id: "sync", icon: Upload },
+  { id: "images", icon: ImagePlus },
   { id: "about", icon: Info },
 ];
 
@@ -268,6 +407,7 @@ const translations = {
       window: "窗口",
       terminal: "终端",
       sync: "同步",
+      images: "图床",
       about: "关于",
     },
     subtitles: {
@@ -276,6 +416,7 @@ const translations = {
       window: "窗口行为和标题栏。",
       terminal: "注册 shell 集成和快捷词展开。",
       sync: "用 Gitee 代码片段同步片段、分类和标签。",
+      images: "配置七牛云，周记里可直接粘贴图片。",
       about: "版本和本地存储信息。",
     },
     giteeToken: "Gitee Token",
@@ -333,6 +474,8 @@ const translations = {
     accentDetail: "用于选中状态、快捷词和主要操作。",
     compactList: "紧凑列表",
     compactDetail: "降低片段列表的行高。",
+    defaultWorkspace: "默认工作区",
+    defaultWorkspaceDetail: "启动时默认显示片段还是札记。",
     interfaceFont: "界面字体",
     interfaceFontDetail: "用于导航、表单和标签。",
     editorFont: "编辑器字体",
@@ -358,26 +501,63 @@ const translations = {
     timeline: "时间线",
     allWeeklogs: "全部周记",
     thisWeek: "本周",
+    newWeeklog: "新建周记",
     searchWeeklogs: "搜索周记...",
     noWeeklogs: "还没有周记",
     weeklogTitlePlaceholder: "标题（可选）",
     weeklogBodyPlaceholder: "记录这一周做了什么、遇到了什么、下周打算做什么…",
-    weeklogPickHint: "从左侧选择一周，或点击「本周」开始记录。",
+    weeklogPickHint: "从左侧选择一篇，或点「新增」开始记录。",
     weeklogSaved: "已保存周记",
     weeklogDeleted: "已删除周记",
     weeklogEmpty: "请先填写标题或内容。",
-    wsIdea: "奇思妙想",
-    ideaUnit: "个想法",
-    allIdeas: "全部想法",
-    pinnedIdeas: "已置顶",
-    newIdea: "新想法",
-    searchIdeas: "搜索想法...",
-    noIdeas: "还没有想法，记下第一个吧。",
-    ideaTitlePlaceholder: "标题（可选）",
-    ideaBodyPlaceholder: "写下你的奇思妙想…",
-    ideaPickHint: "从左侧选择一个想法，或点「新想法」开始。",
-    ideaSaved: "已保存想法",
-    ideaDeleted: "已删除想法",
+    weeklogEdit: "编辑",
+    weeklogPreviewEmpty: "还没有内容可预览。",
+    weeklogImageHint: "可直接粘贴图片",
+    weeklogImageUploading: "图片上传中…",
+    weeklogImageUploaded: "图片已上传",
+    weeklogImageNotConfigured: "未配置图床，请先到「设置 → 图床」填写七牛云。",
+    weeklogStar: "加星标",
+    weeklogUnstar: "取消星标",
+    weeklogStarred: "已加星标",
+    weeklogUnstarred: "已取消星标",
+    weeklogStarredFilter: "只看星标",
+    weeklogNoStarred: "还没有星标周记",
+    qiniuTitle: "图床（七牛云）",
+    qiniuDetail: "粘贴到周记里的图片会上传到七牛云，笔记里只保存图片链接。",
+    qiniuAccessKey: "AccessKey",
+    qiniuSecretKey: "SecretKey",
+    qiniuSecretKeyDetail: "保存在本机配置文件，不会写入同步数据。",
+    qiniuBucket: "空间名称 Bucket",
+    qiniuDomain: "绑定域名",
+    qiniuDomainDetail: "用于拼接图片地址，例如 https://cdn.example.com。",
+    qiniuUpHost: "上传域名",
+    qiniuUpHostDetail: "按存储区域填写，留空默认 https://up.qiniup.com。",
+    qiniuSave: "保存图床配置",
+    qiniuSaved: "已保存七牛云图床配置。",
+    qiniuConfigured: "已配置",
+    qiniuNotConfigured: "未配置",
+    qiniuAccessKeyPlaceholder: "输入七牛云 AccessKey",
+    qiniuSecretKeyPlaceholder: "输入七牛云 SecretKey",
+    qiniuBucketPlaceholder: "例如 my-images",
+    qiniuDomainPlaceholder: "https://cdn.example.com",
+    wsTrack: "奇思妙想",
+    trackUnit: "个主题",
+    untitledTrack: "未命名主题",
+    newTrack: "新建主题",
+    searchTracks: "搜索奇思妙想…",
+    noTracks: "还没有奇思妙想，新建一个开始记录。",
+    trackTitlePlaceholder: "主题名称",
+    trackPickHint: "从左侧选择一个主题，或新建一个开始记录。",
+    entryUnit: "条记录",
+    newEntryPlaceholder: "记下新的奇思妙想…",
+    addEntry: "记录",
+    noEntries: "还没有记录，在上面写下第一条。",
+    trackSaved: "已保存主题",
+    trackDeleted: "已删除主题",
+    entryAdded: "已记录",
+    entryDeleted: "已删除记录",
+    entrySaved: "已更新记录",
+    editEntry: "编辑记录",
   },
   en: {
     snippets: "snippets",
@@ -431,6 +611,7 @@ const translations = {
       window: "Window",
       terminal: "Terminal",
       sync: "Sync",
+      images: "Image host",
       about: "About",
     },
     subtitles: {
@@ -439,6 +620,7 @@ const translations = {
       window: "Window behavior and chrome.",
       terminal: "Register shell integrations and shortcut expansion.",
       sync: "Sync snippets, categories, and tags through a Gitee gist.",
+      images: "Configure Qiniu so you can paste images into weekly logs.",
       about: "Version and local storage details.",
     },
     giteeToken: "Gitee token",
@@ -496,6 +678,8 @@ const translations = {
     accentDetail: "Used for selected states, shortcuts, and primary actions.",
     compactList: "Compact list",
     compactDetail: "Reduce row height in the snippet list.",
+    defaultWorkspace: "Default workspace",
+    defaultWorkspaceDetail: "Show snippets or notes on startup.",
     interfaceFont: "Interface font",
     interfaceFontDetail: "Used by navigation, forms, and labels.",
     editorFont: "Editor font",
@@ -521,26 +705,63 @@ const translations = {
     timeline: "Timeline",
     allWeeklogs: "All logs",
     thisWeek: "This week",
+    newWeeklog: "New note",
     searchWeeklogs: "Search logs...",
     noWeeklogs: "No weekly logs yet",
     weeklogTitlePlaceholder: "Title (optional)",
     weeklogBodyPlaceholder: "What you did this week, what came up, what's next…",
-    weeklogPickHint: "Pick a week on the left, or hit This week to start.",
+    weeklogPickHint: "Pick a note on the left, or hit New to start.",
     weeklogSaved: "Saved weekly log",
     weeklogDeleted: "Deleted weekly log",
     weeklogEmpty: "Add a title or some content first.",
-    wsIdea: "Ideas",
-    ideaUnit: "ideas",
-    allIdeas: "All ideas",
-    pinnedIdeas: "Pinned",
-    newIdea: "New idea",
-    searchIdeas: "Search ideas...",
-    noIdeas: "No ideas yet — capture your first.",
-    ideaTitlePlaceholder: "Title (optional)",
-    ideaBodyPlaceholder: "Jot down your idea…",
-    ideaPickHint: "Pick an idea on the left, or hit New idea.",
-    ideaSaved: "Saved idea",
-    ideaDeleted: "Deleted idea",
+    weeklogEdit: "Edit",
+    weeklogPreviewEmpty: "Nothing to preview yet.",
+    weeklogImageHint: "Paste an image to upload",
+    weeklogImageUploading: "Uploading image…",
+    weeklogImageUploaded: "Image uploaded",
+    weeklogImageNotConfigured: "No image host set up. Configure Qiniu in Settings → Image host first.",
+    weeklogStar: "Star",
+    weeklogUnstar: "Unstar",
+    weeklogStarred: "Starred",
+    weeklogUnstarred: "Unstarred",
+    weeklogStarredFilter: "Starred only",
+    weeklogNoStarred: "No starred logs yet",
+    qiniuTitle: "Image host (Qiniu)",
+    qiniuDetail: "Images pasted into a log upload to Qiniu; the note only stores the link.",
+    qiniuAccessKey: "AccessKey",
+    qiniuSecretKey: "SecretKey",
+    qiniuSecretKeyDetail: "Stored in a local config file, never written to sync data.",
+    qiniuBucket: "Bucket",
+    qiniuDomain: "Bound domain",
+    qiniuDomainDetail: "Used to build the image URL, e.g. https://cdn.example.com.",
+    qiniuUpHost: "Upload host",
+    qiniuUpHostDetail: "Match your storage region; leave blank for https://up.qiniup.com.",
+    qiniuSave: "Save image host",
+    qiniuSaved: "Saved Qiniu image host config.",
+    qiniuConfigured: "Configured",
+    qiniuNotConfigured: "Not configured",
+    qiniuAccessKeyPlaceholder: "Enter Qiniu AccessKey",
+    qiniuSecretKeyPlaceholder: "Enter Qiniu SecretKey",
+    qiniuBucketPlaceholder: "e.g. my-images",
+    qiniuDomainPlaceholder: "https://cdn.example.com",
+    wsTrack: "Ideas",
+    trackUnit: "topics",
+    untitledTrack: "Untitled topic",
+    newTrack: "New topic",
+    searchTracks: "Search ideas...",
+    noTracks: "No ideas yet — create one to start.",
+    trackTitlePlaceholder: "Topic name",
+    trackPickHint: "Pick a topic on the left, or create one to start.",
+    entryUnit: "entries",
+    newEntryPlaceholder: "Log a new entry…",
+    addEntry: "Log",
+    noEntries: "No entries yet — add the first one above.",
+    trackSaved: "Saved topic",
+    trackDeleted: "Deleted topic",
+    entryAdded: "Logged",
+    entryDeleted: "Deleted entry",
+    entrySaved: "Updated entry",
+    editEntry: "Edit entry",
   },
   ja: {
     snippets: "スニペット",
@@ -594,6 +815,7 @@ const translations = {
       window: "ウィンドウ",
       terminal: "ターミナル",
       sync: "同期",
+      images: "画像ホスト",
       about: "情報",
     },
     subtitles: {
@@ -602,6 +824,7 @@ const translations = {
       window: "ウィンドウ動作とタイトルバー。",
       terminal: "シェル連携とショートカット展開を登録します。",
       sync: "Gitee コードスニペットでスニペット、カテゴリ、タグを同期します。",
+      images: "Qiniu を設定すると、週次ログに画像を貼り付けできます。",
       about: "バージョンとローカル保存情報。",
     },
     giteeToken: "Gitee トークン",
@@ -659,6 +882,8 @@ const translations = {
     accentDetail: "選択状態、ショートカット、主要操作に使用します。",
     compactList: "コンパクトリスト",
     compactDetail: "スニペット一覧の行の高さを低くします。",
+    defaultWorkspace: "デフォルトのワークスペース",
+    defaultWorkspaceDetail: "起動時にスニペットと雑記のどちらを表示するか。",
     interfaceFont: "UI フォント",
     interfaceFontDetail: "ナビゲーション、フォーム、ラベルに使用します。",
     editorFont: "エディタフォント",
@@ -684,26 +909,63 @@ const translations = {
     timeline: "タイムライン",
     allWeeklogs: "すべて",
     thisWeek: "今週",
+    newWeeklog: "新規",
     searchWeeklogs: "週次ログを検索...",
     noWeeklogs: "週次ログがありません",
     weeklogTitlePlaceholder: "タイトル（任意）",
     weeklogBodyPlaceholder: "今週やったこと、起きたこと、来週の予定…",
-    weeklogPickHint: "左から週を選ぶか、「今週」で記録を始めます。",
+    weeklogPickHint: "左からノートを選ぶか、「新規」で書き始めます。",
     weeklogSaved: "週次ログを保存しました",
     weeklogDeleted: "週次ログを削除しました",
     weeklogEmpty: "タイトルか本文を入力してください。",
-    wsIdea: "ひらめき",
-    ideaUnit: "件",
-    allIdeas: "すべて",
-    pinnedIdeas: "ピン留め",
-    newIdea: "新しい着想",
-    searchIdeas: "着想を検索...",
-    noIdeas: "まだ着想がありません。最初の一つを記録しましょう。",
-    ideaTitlePlaceholder: "タイトル（任意）",
-    ideaBodyPlaceholder: "思いついたことを書き留める…",
-    ideaPickHint: "左から選ぶか、「新しい着想」で始めます。",
-    ideaSaved: "着想を保存しました",
-    ideaDeleted: "着想を削除しました",
+    weeklogEdit: "編集",
+    weeklogPreviewEmpty: "プレビューする内容がありません。",
+    weeklogImageHint: "画像を貼り付けできます",
+    weeklogImageUploading: "画像をアップロード中…",
+    weeklogImageUploaded: "画像をアップロードしました",
+    weeklogImageNotConfigured: "画像ホストが未設定です。「設定 → 画像ホスト」で Qiniu を設定してください。",
+    weeklogStar: "スター",
+    weeklogUnstar: "スター解除",
+    weeklogStarred: "スターを付けました",
+    weeklogUnstarred: "スターを外しました",
+    weeklogStarredFilter: "スターのみ",
+    weeklogNoStarred: "スター付きの週次ログがありません",
+    qiniuTitle: "画像ホスト（Qiniu）",
+    qiniuDetail: "週次ログに貼り付けた画像は Qiniu にアップロードされ、ノートにはリンクのみ保存します。",
+    qiniuAccessKey: "AccessKey",
+    qiniuSecretKey: "SecretKey",
+    qiniuSecretKeyDetail: "ローカル設定ファイルに保存し、同期データには書き込みません。",
+    qiniuBucket: "バケット",
+    qiniuDomain: "バインドドメイン",
+    qiniuDomainDetail: "画像URLの生成に使用します。例: https://cdn.example.com。",
+    qiniuUpHost: "アップロードホスト",
+    qiniuUpHostDetail: "保存リージョンに合わせて入力。空欄なら https://up.qiniup.com。",
+    qiniuSave: "画像ホストを保存",
+    qiniuSaved: "Qiniu 画像ホスト設定を保存しました。",
+    qiniuConfigured: "設定済み",
+    qiniuNotConfigured: "未設定",
+    qiniuAccessKeyPlaceholder: "Qiniu の AccessKey を入力",
+    qiniuSecretKeyPlaceholder: "Qiniu の SecretKey を入力",
+    qiniuBucketPlaceholder: "例: my-images",
+    qiniuDomainPlaceholder: "https://cdn.example.com",
+    wsTrack: "アイデア",
+    trackUnit: "件のトピック",
+    untitledTrack: "無題のトピック",
+    newTrack: "新しいトピック",
+    searchTracks: "アイデアを検索...",
+    noTracks: "まだありません。新しく作成しましょう。",
+    trackTitlePlaceholder: "トピック名",
+    trackPickHint: "左からトピックを選ぶか、新しく作成します。",
+    entryUnit: "件の記録",
+    newEntryPlaceholder: "新しい記録を追加…",
+    addEntry: "記録",
+    noEntries: "まだ記録がありません。上から追加してください。",
+    trackSaved: "トピックを保存しました",
+    trackDeleted: "トピックを削除しました",
+    entryAdded: "記録しました",
+    entryDeleted: "記録を削除しました",
+    entrySaved: "記録を更新しました",
+    editEntry: "記録を編集",
   },
 } as const;
 
@@ -712,7 +974,8 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeView, setActiveView] = useState<LibraryView>("all");
-  const [workspace, setWorkspace] = useState<Workspace>("snippets");
+  const [defaultWorkspace, setDefaultWorkspace] = useState<Workspace>(readDefaultWorkspace);
+  const [workspace, setWorkspace] = useState<Workspace>(readDefaultWorkspace);
   const [journalMode, setJournalMode] = useState<JournalMode>("weeklog");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -733,6 +996,13 @@ function App() {
   const [giteeDescription, setGiteeDescription] = useState("AbraTab sync data");
   const [giteePublic, setGiteePublic] = useState(false);
   const [giteeMessage, setGiteeMessage] = useState("");
+  const [qiniuStatus, setQiniuStatus] = useState<QiniuStatus | null>(null);
+  const [qiniuAccessKey, setQiniuAccessKey] = useState("");
+  const [qiniuSecretKey, setQiniuSecretKey] = useState("");
+  const [qiniuBucket, setQiniuBucket] = useState("");
+  const [qiniuDomain, setQiniuDomain] = useState("");
+  const [qiniuUpHost, setQiniuUpHost] = useState("");
+  const [qiniuMessage, setQiniuMessage] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; snippet: Snippet } | null>(null);
   const [textPrompt, setTextPrompt] = useState<{ title: string; value: string } | null>(null);
   const promptResolver = useRef<((value: string | null) => void) | null>(null);
@@ -805,6 +1075,9 @@ function App() {
   useEffect(() => {
     if (settingsOpen && settingsTab === "sync") {
       void refreshGiteeStatus();
+    }
+    if (settingsOpen && settingsTab === "images") {
+      void refreshQiniuStatus();
     }
   }, [settingsOpen, settingsTab]);
 
@@ -1098,6 +1371,32 @@ function App() {
     setGiteeMessage(text.giteeSaved);
   }
 
+  async function refreshQiniuStatus() {
+    const qiniu = await invoke<QiniuStatus>("qiniu_status");
+    setQiniuStatus(qiniu);
+    setQiniuAccessKey(qiniu.access_key);
+    setQiniuBucket(qiniu.bucket);
+    setQiniuDomain(qiniu.domain);
+    setQiniuUpHost(qiniu.up_host);
+  }
+
+  async function saveQiniuConfig() {
+    const qiniu = await invoke<QiniuStatus>("save_qiniu_config", {
+      accessKey: qiniuAccessKey,
+      secretKey: qiniuSecretKey,
+      bucket: qiniuBucket,
+      domain: qiniuDomain,
+      upHost: qiniuUpHost,
+    });
+    setQiniuSecretKey("");
+    setQiniuStatus(qiniu);
+    setQiniuAccessKey(qiniu.access_key);
+    setQiniuBucket(qiniu.bucket);
+    setQiniuDomain(qiniu.domain);
+    setQiniuUpHost(qiniu.up_host);
+    setQiniuMessage(text.qiniuSaved);
+  }
+
   async function pushGiteeSync() {
     const result = await invoke<{ gist_id: string; snippet_count: number }>("push_gitee_sync");
     setGiteeGistId(result.gist_id);
@@ -1179,7 +1478,7 @@ function App() {
           dbPath={dbPath}
         />
       ) : workspace === "journal" ? (
-        <IdeaWorkspace
+        <TrackWorkspace
           text={text}
           locale={locale}
           workspace={workspace}
@@ -1582,6 +1881,30 @@ function App() {
                       <span />
                     </label>
                   </SettingRow>
+                  <SettingRow title={text.defaultWorkspace} detail={text.defaultWorkspaceDetail}>
+                    <div className="segmented">
+                      <button
+                        className={defaultWorkspace === "snippets" ? "selected" : ""}
+                        onClick={() => {
+                          setDefaultWorkspace("snippets");
+                          writeDefaultWorkspace("snippets");
+                          setWorkspace("snippets");
+                        }}
+                      >
+                        {text.wsSnippets}
+                      </button>
+                      <button
+                        className={defaultWorkspace === "journal" ? "selected" : ""}
+                        onClick={() => {
+                          setDefaultWorkspace("journal");
+                          writeDefaultWorkspace("journal");
+                          setWorkspace("journal");
+                        }}
+                      >
+                        {text.wsJournal}
+                      </button>
+                    </div>
+                  </SettingRow>
                 </div>
               ) : null}
 
@@ -1784,6 +2107,80 @@ function App() {
                     </span>
                     <span>{giteeMessage || `${text.giteeConfigPath}: ${giteeStatus?.config_path ?? text.loading}`}</span>
                   </div>
+
+                </div>
+              ) : null}
+
+              {settingsTab === "images" ? (
+                <div className="settings-section sync-panel">
+                  <SettingRow title={text.qiniuAccessKey}>
+                    <input
+                      className="settings-input"
+                      value={qiniuAccessKey}
+                      placeholder={text.qiniuAccessKeyPlaceholder}
+                      onChange={(event) => setQiniuAccessKey(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.qiniuSecretKey} detail={text.qiniuSecretKeyDetail}>
+                    <input
+                      className="settings-input"
+                      type="password"
+                      value={qiniuSecretKey}
+                      placeholder={qiniuStatus?.configured ? "••••••••••••" : text.qiniuSecretKeyPlaceholder}
+                      onChange={(event) => setQiniuSecretKey(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.qiniuBucket}>
+                    <input
+                      className="settings-input"
+                      value={qiniuBucket}
+                      placeholder={text.qiniuBucketPlaceholder}
+                      onChange={(event) => setQiniuBucket(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.qiniuDomain} detail={text.qiniuDomainDetail}>
+                    <input
+                      className="settings-input"
+                      value={qiniuDomain}
+                      placeholder={text.qiniuDomainPlaceholder}
+                      onChange={(event) => setQiniuDomain(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow title={text.qiniuUpHost} detail={text.qiniuUpHostDetail}>
+                    <input
+                      className="settings-input"
+                      value={qiniuUpHost}
+                      placeholder="https://up.qiniup.com"
+                      onChange={(event) => setQiniuUpHost(event.target.value)}
+                    />
+                  </SettingRow>
+
+                  <div className="sync-actions">
+                    <button
+                      className="settings-action"
+                      disabled={
+                        !qiniuAccessKey.trim() ||
+                        !qiniuBucket.trim() ||
+                        !qiniuDomain.trim() ||
+                        (!qiniuSecretKey.trim() && !qiniuStatus?.configured)
+                      }
+                      onClick={() => void saveQiniuConfig().catch(showError)}
+                    >
+                      <Check size={14} />
+                      <span>{text.qiniuSave}</span>
+                    </button>
+                  </div>
+
+                  <div className="sync-status">
+                    <span className={`terminal-badge ${qiniuStatus?.configured ? "ok" : ""}`}>
+                      {qiniuStatus?.configured ? text.qiniuConfigured : text.qiniuNotConfigured}
+                    </span>
+                    <span>{qiniuMessage || `${text.giteeConfigPath}: ${qiniuStatus?.config_path ?? text.loading}`}</span>
+                  </div>
                 </div>
               ) : null}
 
@@ -1922,7 +2319,7 @@ function JournalModeNav({
 }) {
   const items: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
-    { id: "idea", label: text.wsIdea, Icon: Sparkles },
+    { id: "track", label: text.wsTrack, Icon: Activity },
   ];
   return (
     <>
@@ -1963,11 +2360,14 @@ function WeekLogWorkspace({
   dbPath: string;
 }) {
   const [logs, setLogs] = useState<WeekLog[]>([]);
-  const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<WeekForm | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [starredOnly, setStarredOnly] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const intl = localeTags[locale];
 
@@ -1975,71 +2375,95 @@ function WeekLogWorkspace({
     setStatus(error instanceof Error ? error.message : String(error));
   }
 
-  function weekNumber(weekKey: string) {
-    const part = weekKey.split("-W")[1];
-    return part ? Number.parseInt(part, 10) : 0;
+  // Insert text at the textarea caret, keeping the caret after the inserted text.
+  function insertAtCursor(snippet: string) {
+    setForm((current) => {
+      if (!current) return current;
+      const el = textareaRef.current;
+      const body = current.body;
+      const start = el ? el.selectionStart : body.length;
+      const end = el ? el.selectionEnd : body.length;
+      const next = body.slice(0, start) + snippet + body.slice(end);
+      if (el) {
+        const caret = start + snippet.length;
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(caret, caret);
+        });
+      }
+      return { ...current, body: next };
+    });
   }
 
-  function weekLabel(weekKey: string) {
-    const n = weekNumber(weekKey);
-    if (locale === "en") return `Week ${n}`;
-    if (locale === "ja") return `第${n}週`;
-    return `第${n}周`;
+  async function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const file = clipboardImage(event);
+    if (!file) return;
+    event.preventDefault();
+    setUploading(true);
+    setStatus(text.weeklogImageUploading);
+    try {
+      const data = await fileToBase64(file);
+      const result = await invoke<UploadResult>("upload_image", {
+        filename: imageFilename(file),
+        data,
+      });
+      insertAtCursor(`![](${result.url})\n`);
+      setStatus(text.weeklogImageUploaded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Surface a clear hint when the image host has not been set up yet.
+      setStatus(
+        /not configured/i.test(message) ? text.weeklogImageNotConfigured : message,
+      );
+    } finally {
+      setUploading(false);
+    }
   }
 
-  function parseDay(value: string) {
-    return new Date(`${value}T00:00:00`);
+  function parseDate(value: string) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  function weekRange(log: { week_start: string; week_end: string }) {
-    if (!log.week_start || !log.week_end) return "";
-    const fmt = new Intl.DateTimeFormat(intl, { month: "numeric", day: "numeric" });
-    return `${fmt.format(parseDay(log.week_start))} – ${fmt.format(parseDay(log.week_end))}`;
+  function dateLabel(value: string) {
+    const date = parseDate(value);
+    if (!date) return "";
+    return new Intl.DateTimeFormat(intl, { month: "long", day: "numeric" }).format(date);
   }
 
   function monthLabel(value: string) {
-    if (!value) return "";
-    return new Intl.DateTimeFormat(intl, { year: "numeric", month: "long" }).format(parseDay(value));
+    const date = parseDate(value);
+    if (!date) return "";
+    return new Intl.DateTimeFormat(intl, { year: "numeric", month: "long" }).format(date);
   }
+
+  const selected = logs.find((log) => log.id === selectedId) ?? null;
+
+  const visibleLogs = useMemo(
+    () => (starredOnly ? logs.filter((log) => log.favorite) : logs),
+    [logs, starredOnly],
+  );
 
   const groups = useMemo(() => {
     const out: Array<{ label: string; items: WeekLog[] }> = [];
-    for (const log of logs) {
-      const label = monthLabel(log.week_start) || log.week_key;
+    for (const log of visibleLogs) {
+      const label = monthLabel(log.created_at) || text.wsWeeklog;
       const last = out[out.length - 1];
       if (last && last.label === label) last.items.push(log);
       else out.push({ label, items: [log] });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs, intl]);
+  }, [visibleLogs, intl]);
 
   function loadIntoForm(log: WeekLog) {
-    setSelectedKey(log.week_key);
-    setForm({
-      id: log.id,
-      week_key: log.week_key,
-      week_start: log.week_start,
-      week_end: log.week_end,
-      title: log.title,
-      body: log.body,
-    });
+    setSelectedId(log.id);
+    setForm({ id: log.id, title: log.title, body: log.body });
   }
 
-  function openWeek(week: CurrentWeek, existing: WeekLog[] = logs) {
-    const match = existing.find((log) => log.week_key === week.week_key);
-    if (match) {
-      loadIntoForm(match);
-      return;
-    }
-    setSelectedKey(week.week_key);
-    setForm({
-      week_key: week.week_key,
-      week_start: week.week_start,
-      week_end: week.week_end,
-      title: "",
-      body: "",
-    });
+  function newNote() {
+    setSelectedId(null);
+    setForm({ title: "", body: "" });
   }
 
   async function refresh(nextQuery = query) {
@@ -2050,26 +2474,11 @@ function WeekLogWorkspace({
 
   useEffect(() => {
     void (async () => {
-      const week = await invoke<CurrentWeek>("current_week");
-      setCurrentWeek(week);
       const rows = await refresh("");
-      const thisWeek = rows.find((log) => log.week_key === week.week_key);
-      if (thisWeek) loadIntoForm(thisWeek);
-      else if (rows.length) loadIntoForm(rows[0]);
-      else openWeek(week, rows);
+      if (rows.length) loadIntoForm(rows[0]);
     })().catch(showError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function openThisWeek() {
-    try {
-      const week = currentWeek ?? (await invoke<CurrentWeek>("current_week"));
-      if (!currentWeek) setCurrentWeek(week);
-      openWeek(week);
-    } catch (error) {
-      showError(error);
-    }
-  }
 
   async function save() {
     if (!form) return;
@@ -2081,14 +2490,14 @@ function WeekLogWorkspace({
       const saved = await invoke<WeekLog>("save_week_log", {
         input: {
           id: form.id,
-          week_key: form.week_key,
+          week_key: "",
           title: form.title,
           body: form.body,
         },
       });
       await refresh();
       loadIntoForm(saved);
-      setStatus(`${text.weeklogSaved} · ${weekLabel(saved.week_key)}`);
+      setStatus(text.weeklogSaved);
     } catch (error) {
       showError(error);
     }
@@ -2102,9 +2511,19 @@ function WeekLogWorkspace({
       setStatus(text.weeklogDeleted);
       if (rows.length) loadIntoForm(rows[0]);
       else {
-        setSelectedKey(null);
+        setSelectedId(null);
         setForm(null);
       }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function toggleFavorite(log: WeekLog) {
+    try {
+      await invoke("set_week_log_favorite", { id: log.id, favorite: !log.favorite });
+      await refresh();
+      setStatus(!log.favorite ? text.weeklogStarred : text.weeklogUnstarred);
     } catch (error) {
       showError(error);
     }
@@ -2130,7 +2549,7 @@ function WeekLogWorkspace({
         </div>
 
         <div className="nav-foot">
-          <button title={text.thisWeek} onClick={() => void openThisWeek()}>
+          <button title={text.newWeeklog} onClick={() => newNote()}>
             <CalendarPlus size={15} />
           </button>
           <span>{text.wsWeeklog}</span>
@@ -2153,7 +2572,14 @@ function WeekLogWorkspace({
               placeholder={text.searchWeeklogs}
             />
           </label>
-          <button className="add-button" onClick={() => void openThisWeek()} title={text.thisWeek}>
+          <button
+            className={`add-button ${starredOnly ? "starred-on" : ""}`}
+            onClick={() => setStarredOnly((value) => !value)}
+            title={text.weeklogStarredFilter}
+          >
+            <Star size={16} fill={starredOnly ? "currentColor" : "none"} />
+          </button>
+          <button className="add-button" onClick={() => newNote()} title={text.newWeeklog}>
             <CalendarPlus size={17} />
           </button>
         </div>
@@ -2165,17 +2591,17 @@ function WeekLogWorkspace({
               {group.items.map((log) => (
                 <button
                   key={log.id}
-                  className={`snippet-item ${log.week_key === selectedKey ? "selected" : ""}`}
+                  className={`snippet-item ${log.id === selectedId ? "selected" : ""}`}
                   onClick={() => loadIntoForm(log)}
                 >
                   <div className="snippet-title-row">
-                    {currentWeek && log.week_key === currentWeek.week_key ? <span className="hot">●</span> : null}
-                    <span className="snippet-title">{log.title.trim() || weekLabel(log.week_key)}</span>
+                    <span className="snippet-title">{log.title.trim() || dateLabel(log.created_at) || text.wsWeeklog}</span>
+                    {log.favorite ? <Star className="weeklog-star" size={13} fill="currentColor" /> : null}
                   </div>
                   <div className="snippet-meta">
                     <span className="folder-meta">
                       <CalendarRange size={11} />
-                      {weekLabel(log.week_key)} · {weekRange(log)}
+                      {dateLabel(log.created_at)}
                     </span>
                   </div>
                   {log.body.trim() ? <div className="weeklog-preview">{log.body.trim().split("\n")[0]}</div> : null}
@@ -2183,7 +2609,9 @@ function WeekLogWorkspace({
               ))}
             </React.Fragment>
           ))}
-          {logs.length === 0 ? <div className="empty-list">{text.noWeeklogs}</div> : null}
+          {visibleLogs.length === 0 ? (
+            <div className="empty-list">{starredOnly ? text.weeklogNoStarred : text.noWeeklogs}</div>
+          ) : null}
         </div>
       </section>
 
@@ -2192,7 +2620,7 @@ function WeekLogWorkspace({
           <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
             <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
               <CalendarRange size={11} />
-              {form ? `${weekLabel(form.week_key)} · ${weekRange(form)}` : text.wsWeeklog}
+              {selected ? dateLabel(selected.created_at) : text.wsWeeklog}
             </div>
             <input
               value={form?.title ?? ""}
@@ -2202,6 +2630,24 @@ function WeekLogWorkspace({
             />
           </div>
           <div className="editor-tools">
+            {selected ? (
+              <button
+                className={`icon-button fav ${selected.favorite ? "on" : ""}`}
+                title={selected.favorite ? text.weeklogUnstar : text.weeklogStar}
+                onClick={() => void toggleFavorite(selected)}
+              >
+                <Star size={16} fill={selected.favorite ? "currentColor" : "none"} />
+              </button>
+            ) : null}
+            {form ? (
+              <button
+                className={`icon-button ${showPreview ? "active" : ""}`}
+                title={showPreview ? text.weeklogEdit : text.preview}
+                onClick={() => setShowPreview((value) => !value)}
+              >
+                {showPreview ? <Pencil size={16} /> : <Eye size={16} />}
+              </button>
+            ) : null}
             {form?.id ? (
               <button className="icon-button" title={text.delete} onClick={() => void remove()}>
                 <Trash2 size={16} />
@@ -2215,22 +2661,45 @@ function WeekLogWorkspace({
             <>
               <div className="code-card weeklog-card">
                 <div className="code-top">
-                  <span className="code-label">{weekLabel(form.week_key)}</span>
+                  <span className="code-label">{selected ? dateLabel(selected.created_at) : text.newWeeklog}</span>
+                  <span className="weeklog-hint">
+                    {uploading ? (
+                      text.weeklogImageUploading
+                    ) : (
+                      <>
+                        <ImagePlus size={12} />
+                        {text.weeklogImageHint}
+                      </>
+                    )}
+                  </span>
                   <span className="line-count">{form.body.split("\n").length} {text.lines}</span>
                 </div>
-                <textarea
-                  className="weeklog-textarea"
-                  value={form.body}
-                  onChange={(event) => setForm({ ...form, body: event.target.value })}
-                  onKeyDown={(event) => {
-                    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
-                      event.preventDefault();
-                      void save();
-                    }
-                  }}
-                  placeholder={text.weeklogBodyPlaceholder}
-                  spellCheck={false}
-                />
+                {showPreview ? (
+                  form.body.trim() ? (
+                    <div
+                      className="weeklog-preview-pane markdown-body"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(form.body) }}
+                    />
+                  ) : (
+                    <div className="weeklog-preview-pane empty">{text.weeklogPreviewEmpty}</div>
+                  )
+                ) : (
+                  <textarea
+                    ref={textareaRef}
+                    className="weeklog-textarea"
+                    value={form.body}
+                    onChange={(event) => setForm({ ...form, body: event.target.value })}
+                    onPaste={(event) => void handlePaste(event)}
+                    onKeyDown={(event) => {
+                      if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+                        event.preventDefault();
+                        void save();
+                      }
+                    }}
+                    placeholder={text.weeklogBodyPlaceholder}
+                    spellCheck={false}
+                  />
+                )}
               </div>
 
               <div className="weeklog-actions">
@@ -2248,7 +2717,7 @@ function WeekLogWorkspace({
         <footer className="status-bar">
           <span>
             <CalendarDays size={13} />
-            {form ? weekLabel(form.week_key) : text.wsWeeklog}
+            {selected ? dateLabel(selected.created_at) : text.wsWeeklog}
           </span>
           <span className="db">
             <Database size={13} />
@@ -2261,7 +2730,7 @@ function WeekLogWorkspace({
   );
 }
 
-function IdeaWorkspace({
+function TrackWorkspace({
   text,
   locale,
   workspace,
@@ -2282,11 +2751,15 @@ function IdeaWorkspace({
   startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
   dbPath: string;
 }) {
-  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [form, setForm] = useState<IdeaForm | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [entries, setEntries] = useState<TrackEntry[]>([]);
+  const [newEntry, setNewEntry] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const intl = localeTags[locale];
 
@@ -2294,81 +2767,132 @@ function IdeaWorkspace({
     setStatus(error instanceof Error ? error.message : String(error));
   }
 
-  function formatDate(value: string) {
+  function formatDate(value: string | null) {
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
-    return new Intl.DateTimeFormat(intl, { month: "short", day: "numeric" }).format(date);
+    return new Intl.DateTimeFormat(intl, { month: "numeric", day: "numeric" }).format(date);
   }
 
-  function loadIntoForm(idea: Idea) {
-    setSelectedId(idea.id);
-    setForm({ id: idea.id, title: idea.title, body: idea.body, pinned: idea.pinned });
+  function formatDateTime(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat(intl, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date);
   }
 
-  function createNew() {
-    setSelectedId(null);
-    setForm({ title: "", body: "", pinned: false });
-  }
-
-  async function refresh(nextQuery = query) {
-    const rows = await invoke<Idea[]>("list_ideas", { query: nextQuery.trim() || null });
-    setIdeas(rows);
+  async function refreshTracks(nextQuery = query) {
+    const rows = await invoke<Track[]>("list_tracks", { query: nextQuery.trim() || null });
+    setTracks(rows);
     return rows;
+  }
+
+  async function loadEntries(trackId: string) {
+    const rows = await invoke<TrackEntry[]>("list_track_entries", { trackId });
+    setEntries(rows);
+  }
+
+  async function selectTrack(track: Track) {
+    setSelectedId(track.id);
+    setTitleDraft(track.title);
+    setNewEntry("");
+    await loadEntries(track.id);
   }
 
   useEffect(() => {
     void (async () => {
-      const rows = await refresh("");
-      if (rows.length) loadIntoForm(rows[0]);
-      else createNew();
+      const rows = await refreshTracks("");
+      if (rows.length) await selectTrack(rows[0]);
     })().catch(showError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function save() {
-    if (!form) return;
-    if (!form.title.trim() && !form.body.trim()) {
-      setStatus(text.weeklogEmpty);
-      return;
-    }
+  async function createTrack() {
     try {
-      const saved = await invoke<Idea>("save_idea", {
-        input: { id: form.id, title: form.title, body: form.body },
-      });
-      await refresh();
-      loadIntoForm(saved);
-      setStatus(text.ideaSaved);
+      const track = await invoke<Track>("save_track", { input: { title: "" } });
+      await refreshTracks();
+      await selectTrack(track);
     } catch (error) {
       showError(error);
     }
   }
 
-  async function togglePinned() {
-    if (!form) return;
-    const next = !form.pinned;
-    setForm({ ...form, pinned: next });
-    if (!form.id) return;
+  async function saveTitle() {
+    if (!selectedId) return;
     try {
-      await invoke("set_idea_pinned", { id: form.id, pinned: next });
-      await refresh();
+      await invoke<Track>("save_track", { input: { id: selectedId, title: titleDraft } });
+      await refreshTracks();
     } catch (error) {
       showError(error);
     }
   }
 
-  async function remove() {
-    if (!form?.id) {
-      if (ideas.length) loadIntoForm(ideas[0]);
-      else createNew();
-      return;
-    }
+  async function addEntry() {
+    const body = newEntry.trim();
+    if (!selectedId || !body) return;
     try {
-      await invoke("delete_idea", { id: form.id });
-      const rows = await refresh();
-      setStatus(text.ideaDeleted);
-      if (rows.length) loadIntoForm(rows[0]);
-      else createNew();
+      await invoke<TrackEntry>("add_track_entry", { input: { track_id: selectedId, body } });
+      setNewEntry("");
+      await loadEntries(selectedId);
+      await refreshTracks();
+      setStatus(text.entryAdded);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function deleteEntry(id: string) {
+    if (!selectedId) return;
+    try {
+      await invoke("delete_track_entry", { id });
+      await loadEntries(selectedId);
+      await refreshTracks();
+      setStatus(text.entryDeleted);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  function startEntryEdit(entry: TrackEntry) {
+    setEditingId(entry.id);
+    setEditDraft(entry.body);
+  }
+
+  async function saveEntryEdit() {
+    const id = editingId;
+    if (!id) return;
+    const original = entries.find((entry) => entry.id === id);
+    const body = editDraft.trim();
+    setEditingId(null);
+    if (!original || !body || body === original.body) return;
+    try {
+      await invoke("update_track_entry", { id, body });
+      if (selectedId) await loadEntries(selectedId);
+      setStatus(text.entrySaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function deleteTrack() {
+    if (!selectedId) return;
+    try {
+      await invoke("delete_track", { id: selectedId });
+      const rows = await refreshTracks();
+      setStatus(text.trackDeleted);
+      if (rows.length) {
+        await selectTrack(rows[0]);
+      } else {
+        setSelectedId(null);
+        setEntries([]);
+        setTitleDraft("");
+      }
     } catch (error) {
       showError(error);
     }
@@ -2379,11 +2903,11 @@ function IdeaWorkspace({
       <nav className="nav-panel">
         <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
           <div className="brand-logo">
-            <Sparkles size={20} />
+            <Activity size={20} />
           </div>
           <div data-tauri-drag-region>
             <h1>AbraTab</h1>
-            <p>{ideas.length} {text.ideaUnit}</p>
+            <p>{tracks.length} {text.trackUnit}</p>
           </div>
         </div>
 
@@ -2394,10 +2918,10 @@ function IdeaWorkspace({
         </div>
 
         <div className="nav-foot">
-          <button title={text.newIdea} onClick={createNew}>
+          <button title={text.newTrack} onClick={() => void createTrack()}>
             <Plus size={15} />
           </button>
-          <span>{text.wsIdea}</span>
+          <span>{text.wsTrack}</span>
           <button title={text.settings} onClick={onOpenSettings}>
             <Settings size={15} />
           </button>
@@ -2412,39 +2936,36 @@ function IdeaWorkspace({
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
-                void refresh(event.target.value).catch(showError);
+                void refreshTracks(event.target.value).catch(showError);
               }}
-              placeholder={text.searchIdeas}
+              placeholder={text.searchTracks}
             />
           </label>
-          <button className="add-button" onClick={createNew} title={text.newIdea}>
+          <button className="add-button" onClick={() => void createTrack()} title={text.newTrack}>
             <Plus size={17} />
           </button>
         </div>
 
         <div className="snippet-list">
-          {ideas.map((idea) => (
+          {tracks.map((track) => (
             <button
-              key={idea.id}
-              className={`snippet-item ${idea.id === selectedId ? "selected" : ""}`}
-              onClick={() => loadIntoForm(idea)}
+              key={track.id}
+              className={`snippet-item ${track.id === selectedId ? "selected" : ""}`}
+              onClick={() => void selectTrack(track)}
             >
               <div className="snippet-title-row">
-                {idea.pinned ? <Pin size={12} className="pin-mark" /> : null}
-                <span className="snippet-title">
-                  {idea.title.trim() || idea.body.trim().split("\n")[0] || text.untitledSnippet}
-                </span>
+                <span className="snippet-title">{track.title.trim() || text.untitledTrack}</span>
               </div>
-              {idea.body.trim() ? <div className="weeklog-preview">{idea.body.trim().split("\n")[0]}</div> : null}
               <div className="snippet-meta">
                 <span className="folder-meta">
-                  <Sparkles size={11} />
-                  {formatDate(idea.updated_at)}
+                  <Activity size={11} />
+                  {track.entry_count} {text.entryUnit}
+                  {track.last_entry_at ? ` · ${formatDate(track.last_entry_at)}` : ""}
                 </span>
               </div>
             </button>
           ))}
-          {ideas.length === 0 ? <div className="empty-list">{text.noIdeas}</div> : null}
+          {tracks.length === 0 ? <div className="empty-list">{text.noTracks}</div> : null}
         </div>
       </section>
 
@@ -2452,27 +2973,20 @@ function IdeaWorkspace({
         <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
           <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
             <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
-              <Sparkles size={11} />
-              {text.wsIdea}
+              <Activity size={11} />
+              {selectedId ? `${entries.length} ${text.entryUnit}` : text.wsTrack}
             </div>
             <input
-              value={form?.title ?? ""}
-              onChange={(event) => form && setForm({ ...form, title: event.target.value })}
-              placeholder={text.ideaTitlePlaceholder}
-              disabled={!form}
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={() => void saveTitle()}
+              placeholder={text.trackTitlePlaceholder}
+              disabled={!selectedId}
             />
           </div>
           <div className="editor-tools">
-            <button
-              className={`icon-button fav ${form?.pinned ? "on" : ""}`}
-              title={form?.pinned ? text.unpin : text.pin}
-              onClick={() => void togglePinned()}
-              disabled={!form}
-            >
-              <Pin size={16} fill={form?.pinned ? "currentColor" : "none"} />
-            </button>
-            {form?.id ? (
-              <button className="icon-button" title={text.delete} onClick={() => void remove()}>
+            {selectedId ? (
+              <button className="icon-button" title={text.delete} onClick={() => void deleteTrack()}>
                 <Trash2 size={16} />
               </button>
             ) : null}
@@ -2480,43 +2994,74 @@ function IdeaWorkspace({
         </header>
 
         <div className="editor-body">
-          {form ? (
+          {selectedId ? (
             <>
-              <div className="code-card weeklog-card">
-                <div className="code-top">
-                  <span className="code-label">{text.wsIdea}</span>
-                  <span className="line-count">{form.body.split("\n").length} {text.lines}</span>
-                </div>
+              <div className="entry-compose">
                 <textarea
-                  className="weeklog-textarea"
-                  value={form.body}
-                  onChange={(event) => setForm({ ...form, body: event.target.value })}
+                  value={newEntry}
+                  onChange={(event) => setNewEntry(event.target.value)}
                   onKeyDown={(event) => {
-                    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+                    if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault();
-                      void save();
+                      void addEntry();
                     }
                   }}
-                  placeholder={text.ideaBodyPlaceholder}
+                  placeholder={text.newEntryPlaceholder}
                   spellCheck={false}
                 />
-              </div>
-              <div className="weeklog-actions">
-                <button type="button" className="weeklog-save" onClick={() => void save()}>
-                  <Check size={14} />
-                  {text.save}
+                <button
+                  type="button"
+                  className="weeklog-save"
+                  onClick={() => void addEntry()}
+                  disabled={!newEntry.trim()}
+                >
+                  <Plus size={14} />
+                  {text.addEntry}
                 </button>
+              </div>
+
+              <div className="timeline">
+                {entries.map((entry) => (
+                  <div className="timeline-item" key={entry.id}>
+                    <span className="timeline-dot" />
+                    <div className="timeline-row">
+                      <div className="timeline-content">
+                        <div className="timeline-body">{entry.body}</div>
+                        <div className="timeline-time">{formatDateTime(entry.created_at)}</div>
+                      </div>
+                      <div className="timeline-actions">
+                        <button
+                          type="button"
+                          className="timeline-action"
+                          title={text.editEntry}
+                          onClick={() => startEntryEdit(entry)}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="timeline-action"
+                          title={text.delete}
+                          onClick={() => void deleteEntry(entry.id)}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {entries.length === 0 ? <div className="empty-list">{text.noEntries}</div> : null}
               </div>
             </>
           ) : (
-            <div className="weeklog-empty-editor">{text.ideaPickHint}</div>
+            <div className="weeklog-empty-editor">{text.trackPickHint}</div>
           )}
         </div>
 
         <footer className="status-bar">
           <span>
-            <Sparkles size={13} />
-            {text.wsIdea}
+            <Activity size={13} />
+            {text.wsTrack}
           </span>
           <span className="db">
             <Database size={13} />
@@ -2525,6 +3070,48 @@ function IdeaWorkspace({
           <span className="status">{status ? <Check size={13} /> : null}{status}</span>
         </footer>
       </section>
+
+      {editingId ? (
+        <div className="prompt-overlay" role="presentation" onMouseDown={() => setEditingId(null)}>
+          <form
+            className="prompt-dialog entry-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={text.editEntry}
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveEntryEdit();
+            }}
+          >
+            <h3>{text.editEntry}</h3>
+            <textarea
+              autoFocus
+              className="entry-edit-textarea"
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setEditingId(null);
+                } else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  void saveEntryEdit();
+                }
+              }}
+              spellCheck={false}
+            />
+            <div className="prompt-actions">
+              <button type="button" className="prompt-cancel" onClick={() => setEditingId(null)}>
+                {text.cancel}
+              </button>
+              <button type="submit" className="prompt-confirm">
+                {text.save}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -2535,14 +3122,14 @@ function SettingRow({
   children,
 }: {
   title: string;
-  detail: string;
+  detail?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="setting-row">
       <div>
         <h4>{title}</h4>
-        <p>{detail}</p>
+        {detail ? <p>{detail}</p> : null}
       </div>
       <div className="setting-control">{children}</div>
     </div>

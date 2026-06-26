@@ -1,4 +1,6 @@
-use crate::models::{Idea, IdeaInput, Snippet, SnippetInput, WeekLog, WeekLogInput};
+use crate::models::{
+    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::env;
@@ -234,13 +236,11 @@ impl Store {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, week_key, week_start, week_end, title, body, tags, created_at, updated_at
+                SELECT id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at
                 FROM week_logs
                 WHERE lower(title) LIKE ?1
                    OR lower(body) LIKE ?1
-                   OR lower(tags) LIKE ?1
-                   OR lower(week_key) LIKE ?1
-                ORDER BY week_key DESC
+                ORDER BY created_at DESC
                 "#,
             )?;
             let rows = stmt
@@ -250,9 +250,9 @@ impl Store {
         } else {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, week_key, week_start, week_end, title, body, tags, created_at, updated_at
+                SELECT id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at
                 FROM week_logs
-                ORDER BY week_key DESC
+                ORDER BY created_at DESC
                 "#,
             )?;
             let rows = stmt
@@ -267,7 +267,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, week_key, week_start, week_end, title, body, tags, created_at, updated_at
+                SELECT id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at
                 FROM week_logs
                 WHERE id = ?1
                 "#,
@@ -280,16 +280,12 @@ impl Store {
 
     #[allow(dead_code)]
     pub fn save_week_log(&self, input: WeekLogInput) -> Result<WeekLog> {
-        let week_key = normalize_week_key(&input.week_key)?;
-        let (week_start, week_end) = week_bounds(&week_key)?;
         let now = now_string();
-
-        let existing = self.get_week_log_by_key(&week_key)?;
         let id = input
             .id
             .filter(|value| !value.trim().is_empty())
-            .or_else(|| existing.as_ref().map(|log| log.id.clone()))
             .unwrap_or_else(new_week_log_id);
+        let existing = self.get_week_log(&id)?;
         let created_at = existing
             .as_ref()
             .map(|log| log.created_at.clone())
@@ -298,11 +294,9 @@ impl Store {
 
         self.conn.execute(
             r#"
-            INSERT INTO week_logs (id, week_key, week_start, week_end, title, body, tags, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            ON CONFLICT(week_key) DO UPDATE SET
-                week_start = excluded.week_start,
-                week_end = excluded.week_end,
+            INSERT INTO week_logs (id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at)
+            VALUES (?1, ?2, '', '', ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 body = excluded.body,
                 tags = excluded.tags,
@@ -310,19 +304,27 @@ impl Store {
             "#,
             params![
                 id,
-                week_key,
-                week_start,
-                week_end,
+                input.week_key,
                 input.title.unwrap_or_default(),
                 input.body,
                 tags,
+                input.favorite.unwrap_or(false),
                 created_at,
                 now,
             ],
         )?;
 
-        self.get_week_log_by_key(&week_key)?
-            .context("week log was not saved")
+        self.get_week_log(&id)?.context("week log was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn set_week_log_favorite(&self, id: &str, favorite: bool) -> Result<()> {
+        let now = now_string();
+        self.conn.execute(
+            "UPDATE week_logs SET favorite = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, favorite, now],
+        )?;
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -337,7 +339,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, week_key, week_start, week_end, title, body, tags, created_at, updated_at
+                SELECT id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at
                 FROM week_logs
                 WHERE week_key = ?1
                 "#,
@@ -348,119 +350,180 @@ impl Store {
             .map_err(Into::into)
     }
 
-    pub fn list_ideas(&self, query: Option<&str>) -> Result<Vec<Idea>> {
-        let ideas = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+    #[allow(dead_code)]
+    pub fn list_tracks(&self, query: Option<&str>) -> Result<Vec<Track>> {
+        let select = r#"
+            SELECT t.id, t.title, t.created_at, t.updated_at,
+                (SELECT COUNT(*) FROM track_entries e WHERE e.track_id = t.id) AS entry_count,
+                (SELECT MAX(created_at) FROM track_entries e WHERE e.track_id = t.id) AS last_entry_at
+            FROM tracks t
+        "#;
+        let tracks = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
             let pattern = format!("%{}%", query.trim().to_lowercase());
-            let mut stmt = self.conn.prepare(
-                r#"
-                SELECT id, title, body, pinned, created_at, updated_at
-                FROM ideas
-                WHERE lower(title) LIKE ?1 OR lower(body) LIKE ?1
-                ORDER BY pinned DESC, updated_at DESC
-                "#,
-            )?;
+            let mut stmt = self.conn.prepare(&format!(
+                "{select}
+                WHERE lower(t.title) LIKE ?1
+                   OR EXISTS (SELECT 1 FROM track_entries e WHERE e.track_id = t.id AND lower(e.body) LIKE ?1)
+                ORDER BY t.updated_at DESC"
+            ))?;
             let rows = stmt
-                .query_map(params![pattern], row_to_idea)?
+                .query_map(params![pattern], row_to_track)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         } else {
-            let mut stmt = self.conn.prepare(
-                r#"
-                SELECT id, title, body, pinned, created_at, updated_at
-                FROM ideas
-                ORDER BY pinned DESC, updated_at DESC
-                "#,
-            )?;
+            let mut stmt = self
+                .conn
+                .prepare(&format!("{select} ORDER BY t.updated_at DESC"))?;
             let rows = stmt
-                .query_map([], row_to_idea)?
+                .query_map([], row_to_track)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         };
-        Ok(ideas)
+        Ok(tracks)
     }
 
-    pub fn get_idea(&self, id: &str) -> Result<Option<Idea>> {
+    #[allow(dead_code)]
+    pub fn get_track(&self, id: &str) -> Result<Option<Track>> {
         self.conn
             .query_row(
                 r#"
-                SELECT id, title, body, pinned, created_at, updated_at
-                FROM ideas
-                WHERE id = ?1
+                SELECT t.id, t.title, t.created_at, t.updated_at,
+                    (SELECT COUNT(*) FROM track_entries e WHERE e.track_id = t.id) AS entry_count,
+                    (SELECT MAX(created_at) FROM track_entries e WHERE e.track_id = t.id) AS last_entry_at
+                FROM tracks t
+                WHERE t.id = ?1
                 "#,
                 params![id],
-                row_to_idea,
+                row_to_track,
             )
             .optional()
             .map_err(Into::into)
     }
 
     #[allow(dead_code)]
-    pub fn save_idea(&self, input: IdeaInput) -> Result<Idea> {
+    pub fn save_track(&self, input: TrackInput) -> Result<Track> {
         let now = now_string();
         let id = input
             .id
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(new_idea_id);
-        let existing = self.get_idea(&id)?;
+            .unwrap_or_else(new_track_id);
+        let existing = self.get_track(&id)?;
         let created_at = existing
             .as_ref()
-            .map(|idea| idea.created_at.clone())
+            .map(|track| track.created_at.clone())
             .unwrap_or_else(|| now.clone());
-        let pinned = existing.as_ref().map(|idea| idea.pinned).unwrap_or(false);
 
         self.conn.execute(
             r#"
-            INSERT INTO ideas (id, title, body, pinned, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO tracks (id, title, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
-                body = excluded.body,
                 updated_at = excluded.updated_at
             "#,
-            params![id, input.title.unwrap_or_default(), input.body, pinned, created_at, now],
+            params![id, input.title.unwrap_or_default(), created_at, now],
         )?;
 
-        self.get_idea(&id)?.context("idea was not saved")
+        self.get_track(&id)?.context("track was not saved")
     }
 
     #[allow(dead_code)]
-    pub fn set_idea_pinned(&self, id: &str, pinned: bool) -> Result<()> {
-        let now = now_string();
-        self.conn.execute(
-            "UPDATE ideas SET pinned = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id, pinned, now],
-        )?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn delete_idea(&self, id: &str) -> Result<()> {
+    pub fn delete_track(&self, id: &str) -> Result<()> {
         self.conn
-            .execute("DELETE FROM ideas WHERE id = ?1", params![id])?;
+            .execute("DELETE FROM track_entries WHERE track_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     #[allow(dead_code)]
-    fn upsert_snapshot_idea(&self, idea: &Idea) -> Result<()> {
+    pub fn list_track_entries(&self, track_id: &str) -> Result<Vec<TrackEntry>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, track_id, body, created_at
+            FROM track_entries
+            WHERE track_id = ?1
+            ORDER BY created_at DESC
+            "#,
+        )?;
+        let rows = stmt
+            .query_map(params![track_id], row_to_track_entry)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    pub fn add_track_entry(&self, input: TrackEntryInput) -> Result<TrackEntry> {
+        let now = now_string();
+        let id = new_entry_id();
+        self.conn.execute(
+            "INSERT INTO track_entries (id, track_id, body, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, input.track_id, input.body, now],
+        )?;
+        // Touch the parent track so it sorts to the top of the list.
+        self.conn.execute(
+            "UPDATE tracks SET updated_at = ?2 WHERE id = ?1",
+            params![input.track_id, now],
+        )?;
+        self.get_track_entry(&id)?.context("track entry was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn update_track_entry(&self, id: &str, body: &str) -> Result<TrackEntry> {
+        self.conn.execute(
+            "UPDATE track_entries SET body = ?2 WHERE id = ?1",
+            params![id, body],
+        )?;
+        self.get_track_entry(id)?.context("track entry not found")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_track_entry(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM track_entries WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn get_track_entry(&self, id: &str) -> Result<Option<TrackEntry>> {
+        self.conn
+            .query_row(
+                "SELECT id, track_id, body, created_at FROM track_entries WHERE id = ?1",
+                params![id],
+                row_to_track_entry,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_track(&self, track: &Track) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO ideas (id, title, body, pinned, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO tracks (id, title, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
-                body = excluded.body,
-                pinned = excluded.pinned,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
             "#,
-            params![
-                idea.id,
-                idea.title,
-                idea.body,
-                idea.pinned,
-                idea.created_at,
-                idea.updated_at,
-            ],
+            params![track.id, track.title, track.created_at, track.updated_at],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_track_entry(&self, entry: &TrackEntry) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO track_entries (id, track_id, body, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(id) DO UPDATE SET
+                track_id = excluded.track_id,
+                body = excluded.body,
+                created_at = excluded.created_at
+            "#,
+            params![entry.id, entry.track_id, entry.body, entry.created_at],
         )?;
         Ok(())
     }
@@ -468,18 +531,19 @@ impl Store {
     #[allow(dead_code)]
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 3,
+            schema: 4,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
             week_logs: self.list_week_logs(None)?,
-            ideas: self.list_ideas(None)?,
+            tracks: self.list_tracks(None)?,
+            track_entries: self.list_all_track_entries()?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 3 {
+        if snapshot.schema == 0 || snapshot.schema > 4 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -514,22 +578,42 @@ impl Store {
                 }
             }
         }
-        for idea in snapshot.ideas {
-            match self.get_idea(&idea.id)? {
-                Some(existing) if existing.updated_at >= idea.updated_at => {
+        for track in snapshot.tracks {
+            match self.get_track(&track.id)? {
+                Some(existing) if existing.updated_at >= track.updated_at => {
                     result.skipped += 1;
                 }
                 Some(_) => {
-                    self.upsert_snapshot_idea(&idea)?;
+                    self.upsert_snapshot_track(&track)?;
                     result.updated += 1;
                 }
                 None => {
-                    self.upsert_snapshot_idea(&idea)?;
+                    self.upsert_snapshot_track(&track)?;
                     result.inserted += 1;
                 }
             }
         }
+        for entry in snapshot.track_entries {
+            // Entries are append-only, so an existing id means it's already here.
+            if self.get_track_entry(&entry.id)?.is_some() {
+                result.skipped += 1;
+            } else {
+                self.upsert_snapshot_track_entry(&entry)?;
+                result.inserted += 1;
+            }
+        }
         Ok(result)
+    }
+
+    #[allow(dead_code)]
+    fn list_all_track_entries(&self) -> Result<Vec<TrackEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, track_id, body, created_at FROM track_entries ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_track_entry)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     #[allow(dead_code)]
@@ -577,15 +661,10 @@ impl Store {
     #[allow(dead_code)]
     fn upsert_snapshot_week_log(&self, log: &WeekLog) -> Result<()> {
         let tags = serde_json::to_string(&log.tags)?;
-        // Keep week_key unique: drop any local row that owns this week under a different id.
-        self.conn.execute(
-            "DELETE FROM week_logs WHERE week_key = ?1 AND id != ?2",
-            params![log.week_key, log.id],
-        )?;
         self.conn.execute(
             r#"
-            INSERT INTO week_logs (id, week_key, week_start, week_end, title, body, tags, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            INSERT INTO week_logs (id, week_key, week_start, week_end, title, body, tags, favorite, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(id) DO UPDATE SET
                 week_key = excluded.week_key,
                 week_start = excluded.week_start,
@@ -593,6 +672,7 @@ impl Store {
                 title = excluded.title,
                 body = excluded.body,
                 tags = excluded.tags,
+                favorite = excluded.favorite,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
             "#,
@@ -604,6 +684,7 @@ impl Store {
                 log.title,
                 log.body,
                 tags,
+                log.favorite,
                 log.created_at,
                 log.updated_at,
             ],
@@ -636,7 +717,7 @@ impl Store {
 
             CREATE TABLE IF NOT EXISTS week_logs (
                 id TEXT PRIMARY KEY NOT NULL,
-                week_key TEXT NOT NULL UNIQUE,
+                week_key TEXT NOT NULL DEFAULT '',
                 week_start TEXT NOT NULL DEFAULT '',
                 week_end TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL DEFAULT '',
@@ -648,22 +729,74 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS week_logs_week_idx ON week_logs(week_key);
 
-            CREATE TABLE IF NOT EXISTS ideas (
+            CREATE TABLE IF NOT EXISTS tracks (
                 id TEXT PRIMARY KEY NOT NULL,
                 title TEXT NOT NULL DEFAULT '',
-                body TEXT NOT NULL DEFAULT '',
-                pinned INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
 
-            CREATE INDEX IF NOT EXISTS ideas_updated_idx ON ideas(updated_at);
+            CREATE TABLE IF NOT EXISTS track_entries (
+                id TEXT PRIMARY KEY NOT NULL,
+                track_id TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS tracks_updated_idx ON tracks(updated_at);
+            CREATE INDEX IF NOT EXISTS track_entries_track_idx ON track_entries(track_id);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
         self.add_column_if_missing("snippets", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
         self.add_column_if_missing("snippets", "deleted_at", "TEXT")?;
+        self.drop_week_logs_unique()?;
+        // After any week_logs rebuild above, ensure the favorite column exists.
+        self.add_column_if_missing("week_logs", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
 
+        Ok(())
+    }
+
+    /// Older databases created `week_logs.week_key` as UNIQUE (one note per week).
+    /// Notes are now independent, so rebuild the table without that constraint.
+    fn drop_week_logs_unique(&self) -> Result<()> {
+        let definition: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'week_logs'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let needs_rebuild = definition
+            .map(|sql| sql.to_uppercase().contains("UNIQUE"))
+            .unwrap_or(false);
+        if !needs_rebuild {
+            return Ok(());
+        }
+        self.conn.execute_batch(
+            r#"
+            BEGIN;
+            ALTER TABLE week_logs RENAME TO week_logs_old;
+            CREATE TABLE week_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                week_key TEXT NOT NULL DEFAULT '',
+                week_start TEXT NOT NULL DEFAULT '',
+                week_end TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO week_logs (id, week_key, week_start, week_end, title, body, tags, created_at, updated_at)
+                SELECT id, week_key, week_start, week_end, title, body, tags, created_at, updated_at
+                FROM week_logs_old;
+            DROP TABLE week_logs_old;
+            CREATE INDEX IF NOT EXISTS week_logs_week_idx ON week_logs(week_key);
+            COMMIT;
+            "#,
+        )?;
         Ok(())
     }
 
@@ -746,19 +879,34 @@ fn new_week_log_id() -> String {
 }
 
 #[allow(dead_code)]
-fn new_idea_id() -> String {
+fn new_track_id() -> String {
     let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    format!("idea_{nanos:x}")
+    format!("trk_{nanos:x}")
 }
 
-fn row_to_idea(row: &rusqlite::Row<'_>) -> rusqlite::Result<Idea> {
-    Ok(Idea {
+#[allow(dead_code)]
+fn new_entry_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("tren_{nanos:x}")
+}
+
+fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
+    Ok(Track {
         id: row.get(0)?,
         title: row.get(1)?,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+        entry_count: row.get(4)?,
+        last_entry_at: row.get(5)?,
+    })
+}
+
+fn row_to_track_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrackEntry> {
+    Ok(TrackEntry {
+        id: row.get(0)?,
+        track_id: row.get(1)?,
         body: row.get(2)?,
-        pinned: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
+        created_at: row.get(3)?,
     })
 }
 
@@ -773,8 +921,9 @@ fn row_to_week_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<WeekLog> {
         title: row.get(4)?,
         body: row.get(5)?,
         tags,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        favorite: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -833,7 +982,9 @@ pub struct SyncSnapshot {
     #[serde(default)]
     pub week_logs: Vec<WeekLog>,
     #[serde(default)]
-    pub ideas: Vec<Idea>,
+    pub tracks: Vec<Track>,
+    #[serde(default)]
+    pub track_entries: Vec<TrackEntry>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

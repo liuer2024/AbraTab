@@ -42,6 +42,8 @@ pub struct WeekLog {
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub favorite: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -54,22 +56,39 @@ pub struct WeekLogInput {
     pub title: Option<String>,
     pub body: String,
     pub tags: Option<Vec<String>>,
+    pub favorite: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Idea {
+pub struct Track {
     pub id: String,
     pub title: String,
-    pub body: String,
-    pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub entry_count: i64,
+    #[serde(default)]
+    pub last_entry_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
-pub struct IdeaInput {
+pub struct TrackInput {
     pub id: Option<String>,
     pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackEntry {
+    pub id: String,
+    pub track_id: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct TrackEntryInput {
+    pub track_id: String,
     pub body: String,
 }

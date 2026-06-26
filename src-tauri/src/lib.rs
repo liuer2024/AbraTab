@@ -1,9 +1,13 @@
 mod gitee_sync;
 mod models;
+mod qiniu;
 mod store;
 
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
-use models::{Idea, IdeaInput, Snippet, SnippetInput, WeekLog, WeekLogInput};
+use qiniu::{QiniuStatus, UploadResult};
+use models::{
+    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -139,6 +143,12 @@ fn save_week_log(input: WeekLogInput) -> Result<WeekLog, AppError> {
 }
 
 #[tauri::command]
+fn set_week_log_favorite(id: String, favorite: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_week_log_favorite(&id, favorite)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn delete_week_log(id: String) -> Result<(), AppError> {
     Store::open_default()?.delete_week_log(&id)?;
     Ok(())
@@ -155,24 +165,39 @@ fn current_week() -> Result<CurrentWeek, AppError> {
 }
 
 #[tauri::command]
-fn list_ideas(query: Option<String>) -> Result<Vec<Idea>, AppError> {
-    Ok(Store::open_default()?.list_ideas(query.as_deref())?)
+fn list_tracks(query: Option<String>) -> Result<Vec<Track>, AppError> {
+    Ok(Store::open_default()?.list_tracks(query.as_deref())?)
 }
 
 #[tauri::command]
-fn save_idea(input: IdeaInput) -> Result<Idea, AppError> {
-    Ok(Store::open_default()?.save_idea(input)?)
+fn save_track(input: TrackInput) -> Result<Track, AppError> {
+    Ok(Store::open_default()?.save_track(input)?)
 }
 
 #[tauri::command]
-fn set_idea_pinned(id: String, pinned: bool) -> Result<(), AppError> {
-    Store::open_default()?.set_idea_pinned(&id, pinned)?;
+fn delete_track(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_track(&id)?;
     Ok(())
 }
 
 #[tauri::command]
-fn delete_idea(id: String) -> Result<(), AppError> {
-    Store::open_default()?.delete_idea(&id)?;
+fn list_track_entries(track_id: String) -> Result<Vec<TrackEntry>, AppError> {
+    Ok(Store::open_default()?.list_track_entries(&track_id)?)
+}
+
+#[tauri::command]
+fn add_track_entry(input: TrackEntryInput) -> Result<TrackEntry, AppError> {
+    Ok(Store::open_default()?.add_track_entry(input)?)
+}
+
+#[tauri::command]
+fn update_track_entry(id: String, body: String) -> Result<TrackEntry, AppError> {
+    Ok(Store::open_default()?.update_track_entry(&id, &body)?)
+}
+
+#[tauri::command]
+fn delete_track_entry(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_track_entry(&id)?;
     Ok(())
 }
 
@@ -197,6 +222,33 @@ async fn pull_gitee_sync() -> Result<GiteePullResult, AppError> {
     let (gist_id, snapshot) = gitee_sync::pull().await?;
     let imported = Store::open_default()?.import_snapshot(snapshot)?;
     Ok(GiteePullResult { gist_id, imported })
+}
+
+#[tauri::command]
+fn qiniu_status() -> Result<QiniuStatus, AppError> {
+    Ok(qiniu::load_status()?)
+}
+
+#[tauri::command]
+fn save_qiniu_config(
+    access_key: String,
+    secret_key: String,
+    bucket: String,
+    domain: String,
+    up_host: Option<String>,
+) -> Result<QiniuStatus, AppError> {
+    Ok(qiniu::save_config(
+        &access_key,
+        &secret_key,
+        &bucket,
+        &domain,
+        up_host.as_deref(),
+    )?)
+}
+
+#[tauri::command]
+async fn upload_image(filename: String, data: String) -> Result<UploadResult, AppError> {
+    Ok(qiniu::upload(&filename, &data).await?)
 }
 
 #[tauri::command]
@@ -455,16 +507,23 @@ pub fn run() {
             database_path,
             list_week_logs,
             save_week_log,
+            set_week_log_favorite,
             delete_week_log,
             current_week,
-            list_ideas,
-            save_idea,
-            set_idea_pinned,
-            delete_idea,
+            list_tracks,
+            save_track,
+            delete_track,
+            list_track_entries,
+            add_track_entry,
+            update_track_entry,
+            delete_track_entry,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,
             pull_gitee_sync,
+            qiniu_status,
+            save_qiniu_config,
+            upload_image,
             terminal_integration_status,
             terminal_dependency_status,
             install_shell_integration,

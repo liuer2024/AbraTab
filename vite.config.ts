@@ -7,6 +7,14 @@ export default defineConfig({
   server: {
     port: 1421,
     strictPort: true,
+    watch: {
+      ignored: [
+        "**/dist/**",
+        "**/src-tauri/target/**",
+        "**/src-tauri/gen/**",
+        "**/src-tauri/.abratab/**",
+      ],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {
