@@ -1,6 +1,6 @@
 use crate::models::{
-    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput,
+    DayActivity, InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry,
+    TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -341,12 +341,13 @@ impl Store {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, name, path, git_url, description, created_at, updated_at
+                SELECT id, name, path, git_url, description, tags, created_at, updated_at
                 FROM projects
                 WHERE lower(name) LIKE ?1
                    OR lower(path) LIKE ?1
                    OR lower(git_url) LIKE ?1
                    OR lower(description) LIKE ?1
+                   OR lower(tags) LIKE ?1
                 ORDER BY updated_at DESC
                 "#,
             )?;
@@ -357,7 +358,7 @@ impl Store {
         } else {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, name, path, git_url, description, created_at, updated_at
+                SELECT id, name, path, git_url, description, tags, created_at, updated_at
                 FROM projects
                 ORDER BY updated_at DESC
                 "#,
@@ -375,7 +376,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, name, path, git_url, description, created_at, updated_at
+                SELECT id, name, path, git_url, description, tags, created_at, updated_at
                 FROM projects
                 WHERE id = ?1
                 "#,
@@ -510,6 +511,33 @@ impl Store {
         self.conn
             .execute("DELETE FROM inbox_items WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    /// Per-day record counts (weeklogs + idea entries + inbox + projects) within
+    /// an inclusive YYYY-MM-DD range, for the activity heatmap.
+    #[allow(dead_code)]
+    pub fn activity_by_day(&self, start: &str, end: &str) -> Result<Vec<DayActivity>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT day, COUNT(*) AS n FROM (
+                SELECT substr(created_at, 1, 10) AS day FROM week_logs
+                UNION ALL SELECT substr(created_at, 1, 10) FROM track_entries
+                UNION ALL SELECT substr(created_at, 1, 10) FROM inbox_items
+                UNION ALL SELECT substr(created_at, 1, 10) FROM projects
+            )
+            WHERE day >= ?1 AND day <= ?2
+            GROUP BY day
+            "#,
+        )?;
+        let rows = stmt
+            .query_map(params![start, end], |row| {
+                Ok(DayActivity {
+                    date: row.get(0)?,
+                    count: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     #[allow(dead_code)]
@@ -708,15 +736,17 @@ impl Store {
 
     #[allow(dead_code)]
     fn upsert_snapshot_project(&self, project: &Project) -> Result<()> {
+        let tags = serde_json::to_string(&project.tags)?;
         self.conn.execute(
             r#"
-            INSERT INTO projects (id, name, path, git_url, description, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO projects (id, name, path, git_url, description, tags, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path = excluded.path,
                 git_url = excluded.git_url,
                 description = excluded.description,
+                tags = excluded.tags,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
             "#,
@@ -1192,21 +1222,25 @@ fn row_to_inbox_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxItem> {
         source: row.get(1)?,
         title: row.get(2)?,
         body: row.get(3)?,
-        read: row.get(4)?,
-        created_at: row.get(5)?,
+        format: row.get(4)?,
+        read: row.get(5)?,
+        created_at: row.get(6)?,
     })
 }
 
 #[allow(dead_code)]
 fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    let tags_json: String = row.get(5)?;
+    let tags = serde_json::from_str(&tags_json).unwrap_or_default();
     Ok(Project {
         id: row.get(0)?,
         name: row.get(1)?,
         path: row.get(2)?,
         git_url: row.get(3)?,
         description: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        tags,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 

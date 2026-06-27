@@ -66,6 +66,8 @@ pub struct Project {
     pub path: String,
     pub git_url: String,
     pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -78,6 +80,13 @@ pub struct ProjectInput {
     pub path: Option<String>,
     pub git_url: Option<String>,
     pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DayActivity {
+    pub date: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

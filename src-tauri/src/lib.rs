@@ -6,8 +6,8 @@ mod store;
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
 use qiniu::{QiniuStatus, UploadResult};
 use models::{
-    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput,
+    DayActivity, InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry,
+    TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -196,6 +196,11 @@ fn set_inbox_read(id: String, read: bool) -> Result<(), AppError> {
 fn delete_inbox_item(id: String) -> Result<(), AppError> {
     Store::open_default()?.delete_inbox_item(&id)?;
     Ok(())
+}
+
+#[tauri::command]
+fn journal_activity(start: String, end: String) -> Result<Vec<DayActivity>, AppError> {
+    Ok(Store::open_default()?.activity_by_day(&start, &end)?)
 }
 
 #[tauri::command]

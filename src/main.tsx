@@ -8,6 +8,7 @@ import {
   CalendarPlus,
   CalendarRange,
   Check,
+  ChevronLeft,
   ChevronRight,
   Code2,
   Copy,
@@ -196,6 +197,7 @@ type Project = {
   path: string;
   git_url: string;
   description: string;
+  tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -206,6 +208,7 @@ type ProjectForm = {
   path: string;
   git_url: string;
   description: string;
+  tags: string[];
 };
 
 type InboxItem = {
@@ -220,6 +223,11 @@ type InboxItem = {
 type InboxConnectionInfo = {
   cli_path: string;
   db_path: string;
+};
+
+type DayActivity = {
+  date: string;
+  count: number;
 };
 
 type Track = {
@@ -739,6 +747,8 @@ const translations = {
     projectPickHint: "从左侧选择一个项目，或新建一个开始登记。",
     projectEmpty: "项目名称、目录或 Git 地址至少填一个",
     projectSaved: "已保存项目",
+    projectTagSet: "打标签",
+    projectTagPlaceholder: "用逗号分隔，如：工作, 重要",
     projectDeleted: "已删除项目",
     wsInbox: "收件箱",
     inboxUnit: "条",
@@ -1015,6 +1025,8 @@ const translations = {
     projectPickHint: "Select a project on the left, or create a new one.",
     projectEmpty: "Enter at least a name, directory, or Git URL",
     projectSaved: "Project saved",
+    projectTagSet: "Set tags",
+    projectTagPlaceholder: "Comma-separated, e.g. work, important",
     projectDeleted: "Project deleted",
     wsInbox: "Inbox",
     inboxUnit: "items",
@@ -1291,6 +1303,8 @@ const translations = {
     projectPickHint: "左側からプロジェクトを選ぶか、新規作成してください。",
     projectEmpty: "名前・ディレクトリ・Git URL のいずれかを入力してください",
     projectSaved: "プロジェクトを保存しました",
+    projectTagSet: "タグを設定",
+    projectTagPlaceholder: "カンマ区切り、例：仕事, 重要",
     projectDeleted: "プロジェクトを削除しました",
     wsInbox: "受信箱",
     inboxUnit: "件",
@@ -2960,6 +2974,92 @@ function WorkspaceToggle({
   );
 }
 
+// Compact one-month activity heatmap shown at the bottom of the journal nav.
+function JournalHeatmap({ locale }: { locale: Locale }) {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  // Months offset from the current month: 0 = this month, -1 = last month, …
+  const [offset, setOffset] = useState(0);
+
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const ymd = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const base = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const start = ymd(first);
+  const end = ymd(last);
+
+  useEffect(() => {
+    invoke<DayActivity[]>("journal_activity", { start, end })
+      .then((rows) => setCounts(Object.fromEntries(rows.map((row) => [row.date, row.count]))))
+      .catch(() => {});
+  }, [start, end]);
+
+  const daysInMonth = last.getDate();
+  const leading = (first.getDay() + 6) % 7; // Monday-first column offset
+  const cells: Array<{ date: string; count: number } | null> = [];
+  for (let i = 0; i < leading; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${year}-${pad(month + 1)}-${pad(day)}`;
+    cells.push({ date, count: counts[date] ?? 0 });
+  }
+
+  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  const todayStr = ymd(now);
+  const monthLabel = new Intl.DateTimeFormat(localeTags[locale], {
+    year: "numeric",
+    month: "long",
+  }).format(base);
+
+  const level = (count: number) => {
+    if (count <= 0) return 0;
+    if (count === 1) return 1;
+    if (count <= 3) return 2;
+    if (count <= 5) return 3;
+    return 4;
+  };
+
+  return (
+    <div className="nav-heatmap">
+      <div className="heatmap-head">
+        <div className="heatmap-monthnav">
+          <button type="button" onClick={() => setOffset((value) => value - 1)} title="←">
+            <ChevronLeft size={13} />
+          </button>
+          <button type="button" className="heatmap-month" onClick={() => setOffset(0)}>
+            {monthLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffset((value) => value + 1)}
+            disabled={offset >= 0}
+            title="→"
+          >
+            <ChevronRight size={13} />
+          </button>
+        </div>
+        <span className="heatmap-total">{total}</span>
+      </div>
+      <div className="heatmap-grid">
+        {cells.map((cell, index) =>
+          cell ? (
+            <div
+              key={cell.date}
+              className={`heatmap-cell ${cell.date === todayStr ? "today" : ""}`}
+              data-level={level(cell.count)}
+              title={`${cell.date} · ${cell.count}`}
+            />
+          ) : (
+            <div key={`blank-${index}`} className="heatmap-cell empty" />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function JournalModeNav({
   mode,
   setMode,
@@ -3308,6 +3408,8 @@ function WeekLogWorkspace({
         <div className="nav-scroll">
           <JournalModeNav mode={mode} setMode={setMode} text={text} />
         </div>
+
+        <JournalHeatmap locale={locale} />
 
         <div className="nav-foot">
           <button title={text.newWeeklog} onClick={() => newNote()}>
@@ -3720,6 +3822,8 @@ args = ["mcp"]`;
           <JournalModeNav mode={mode} setMode={setMode} text={text} />
         </div>
 
+        <JournalHeatmap locale={locale} />
+
         <div className="nav-foot">
           <button title={text.inboxRefresh} onClick={() => void refresh().catch(showError)}>
             <RotateCcw size={15} />
@@ -3895,12 +3999,58 @@ function ProjectWorkspace({
   const [form, setForm] = useState<ProjectForm | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; project: Project } | null>(null);
+  const [tagDialog, setTagDialog] = useState<Project | null>(null);
+  const [tagInput, setTagInput] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   function showError(error: unknown) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
 
   const selected = projects.find((project) => project.id === selectedId) ?? null;
+  const allTags = Array.from(new Set(projects.flatMap((project) => project.tags))).sort();
+  const visibleProjects = tagFilter ? projects.filter((project) => project.tags.includes(tagFilter)) : projects;
+
+  function parseTags(value: string): string[] {
+    return Array.from(
+      new Set(
+        value
+          .split(/[,，]/)
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  function openTagDialog(project: Project) {
+    setContextMenu(null);
+    setTagInput(project.tags.join(", "));
+    setTagDialog(project);
+  }
+
+  async function saveTags() {
+    if (!tagDialog) return;
+    const tags = parseTags(tagInput);
+    try {
+      await invoke("save_project", {
+        input: {
+          id: tagDialog.id,
+          name: tagDialog.name,
+          path: tagDialog.path,
+          git_url: tagDialog.git_url,
+          description: tagDialog.description,
+          tags,
+        },
+      });
+      setTagDialog(null);
+      const rows = await refresh();
+      if (form?.id === tagDialog.id) setForm((current) => (current ? { ...current, tags } : current));
+      if (tagFilter && !rows.some((project) => project.tags.includes(tagFilter))) setTagFilter(null);
+    } catch (error) {
+      showError(error);
+    }
+  }
 
   async function refresh(nextQuery = query) {
     const rows = await invoke<Project[]>("list_projects", { query: nextQuery.trim() || null });
@@ -4001,6 +4151,8 @@ function ProjectWorkspace({
           <JournalModeNav mode={mode} setMode={setMode} text={text} />
         </div>
 
+        <JournalHeatmap locale={locale} />
+
         <div className="nav-foot">
           <button title={text.newProject} onClick={() => newProject()}>
             <Plus size={15} />
@@ -4030,12 +4182,30 @@ function ProjectWorkspace({
           </button>
         </div>
 
+        {allTags.length > 0 ? (
+          <div className="tag-filter">
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                className={`tag-chip ${tagFilter === tag ? "on" : ""}`}
+                onClick={() => setTagFilter((current) => (current === tag ? null : tag))}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="snippet-list">
-          {projects.map((project) => (
+          {visibleProjects.map((project) => (
             <button
               key={project.id}
               className={`snippet-item ${project.id === selectedId ? "selected" : ""}`}
               onClick={() => loadIntoForm(project)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, project });
+              }}
             >
               <div className="snippet-title-row">
                 <span className="snippet-title">{project.name.trim() || text.projectUntitled}</span>
@@ -4046,9 +4216,18 @@ function ProjectWorkspace({
                   {project.path.trim() || text.projectNoPath}
                 </span>
               </div>
+              {project.tags.length > 0 ? (
+                <div className="project-tags">
+                  {project.tags.map((tag) => (
+                    <span className="project-tag" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </button>
           ))}
-          {projects.length === 0 ? <div className="empty-list">{text.noProjects}</div> : null}
+          {visibleProjects.length === 0 ? <div className="empty-list">{text.noProjects}</div> : null}
         </div>
       </section>
 
@@ -4168,6 +4347,56 @@ function ProjectWorkspace({
           <span className="status">{status ? <Check size={13} /> : null}{status}</span>
         </footer>
       </section>
+
+      {contextMenu ? (
+        <>
+          <div
+            className="context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div className="snippet-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            <button onClick={() => openTagDialog(contextMenu.project)}>
+              <Tag size={13} />
+              {text.projectTagSet}
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      {tagDialog ? (
+        <div className="prompt-overlay" role="presentation" onMouseDown={() => setTagDialog(null)}>
+          <form
+            className="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveTags();
+            }}
+          >
+            <h3>{text.projectTagSet}</h3>
+            <input
+              autoFocus
+              value={tagInput}
+              onChange={(event) => setTagInput(event.target.value)}
+              placeholder={text.projectTagPlaceholder}
+            />
+            <div className="prompt-actions">
+              <button type="button" className="prompt-cancel" onClick={() => setTagDialog(null)}>
+                {text.cancel}
+              </button>
+              <button type="submit" className="prompt-confirm">
+                {text.save}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -4409,6 +4638,8 @@ function TrackWorkspace({
         <div className="nav-scroll">
           <JournalModeNav mode={mode} setMode={setMode} text={text} />
         </div>
+
+        <JournalHeatmap locale={locale} />
 
         <div className="nav-foot">
           <button title={text.newTrack} onClick={() => void createTrack()}>
