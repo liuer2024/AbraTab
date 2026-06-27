@@ -30,6 +30,22 @@ pub struct GiteeSyncConfigInput {
     pub public: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncLogEntry {
+    pub at: String,
+    pub action: String,
+    pub ok: bool,
+    pub gist_id: Option<String>,
+    pub snippet_count: usize,
+    pub week_log_count: usize,
+    pub track_count: usize,
+    #[serde(default)]
+    pub project_count: usize,
+    #[serde(default)]
+    pub inbox_count: usize,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct GiteeSyncStatus {
     pub configured: bool,
@@ -37,12 +53,17 @@ pub struct GiteeSyncStatus {
     pub description: String,
     pub public: bool,
     pub config_path: String,
+    pub last_sync: Option<SyncLogEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GiteePushResult {
     pub gist_id: String,
     pub snippet_count: usize,
+    pub week_log_count: usize,
+    pub track_count: usize,
+    pub project_count: usize,
+    pub inbox_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,7 +95,57 @@ pub fn load_status() -> Result<GiteeSyncStatus> {
             .unwrap_or_else(default_description),
         public: config.as_ref().map(|value| value.public).unwrap_or(false),
         config_path: config_path()?.display().to_string(),
+        last_sync: load_last_sync(),
     })
+}
+
+fn log_path() -> Result<PathBuf> {
+    Ok(config_path()?.with_file_name("gitee-sync-log.json"))
+}
+
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+/// Best-effort: persist the outcome of the most recent push/pull so the UI can
+/// show a "last sync" log line. Failures to write the log are ignored.
+#[allow(clippy::too_many_arguments)]
+pub fn record_sync(
+    action: &str,
+    ok: bool,
+    gist_id: Option<&str>,
+    snippet_count: usize,
+    week_log_count: usize,
+    track_count: usize,
+    project_count: usize,
+    inbox_count: usize,
+    message: &str,
+) {
+    let entry = SyncLogEntry {
+        at: now_rfc3339(),
+        action: action.to_string(),
+        ok,
+        gist_id: gist_id.map(ToOwned::to_owned),
+        snippet_count,
+        week_log_count,
+        track_count,
+        project_count,
+        inbox_count,
+        message: message.to_string(),
+    };
+    if let Ok(path) = log_path() {
+        if let Ok(json) = serde_json::to_string_pretty(&entry) {
+            let _ = fs::write(path, json);
+        }
+    }
+}
+
+fn load_last_sync() -> Option<SyncLogEntry> {
+    let path = log_path().ok()?;
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 pub fn save_config(input: GiteeSyncConfigInput) -> Result<GiteeSyncStatus> {
@@ -135,6 +206,10 @@ pub async fn push(snapshot: SyncSnapshot) -> Result<GiteePushResult> {
     Ok(GiteePushResult {
         gist_id,
         snippet_count: snapshot.snippets.len(),
+        week_log_count: snapshot.week_logs.len(),
+        track_count: snapshot.tracks.len(),
+        project_count: snapshot.projects.len(),
+        inbox_count: snapshot.inbox_items.len(),
     })
 }
 

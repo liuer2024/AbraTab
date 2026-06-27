@@ -302,14 +302,75 @@ fn save_gitee_sync_config(input: GiteeSyncConfigInput) -> Result<GiteeSyncStatus
 #[tauri::command]
 async fn push_gitee_sync() -> Result<GiteePushResult, AppError> {
     let snapshot = Store::open_default()?.export_snapshot()?;
-    Ok(gitee_sync::push(snapshot).await?)
+    let counts = (
+        snapshot.snippets.len(),
+        snapshot.week_logs.len(),
+        snapshot.tracks.len(),
+        snapshot.projects.len(),
+        snapshot.inbox_items.len(),
+    );
+    match gitee_sync::push(snapshot).await {
+        Ok(result) => {
+            gitee_sync::record_sync(
+                "push",
+                true,
+                Some(&result.gist_id),
+                counts.0,
+                counts.1,
+                counts.2,
+                counts.3,
+                counts.4,
+                "",
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            gitee_sync::record_sync(
+                "push",
+                false,
+                None,
+                counts.0,
+                counts.1,
+                counts.2,
+                counts.3,
+                counts.4,
+                &error.to_string(),
+            );
+            Err(error.into())
+        }
+    }
 }
 
 #[tauri::command]
 async fn pull_gitee_sync() -> Result<GiteePullResult, AppError> {
-    let (gist_id, snapshot) = gitee_sync::pull().await?;
-    let imported = Store::open_default()?.import_snapshot(snapshot)?;
-    Ok(GiteePullResult { gist_id, imported })
+    match gitee_sync::pull().await {
+        Ok((gist_id, snapshot)) => {
+            let counts = (
+                snapshot.snippets.len(),
+                snapshot.week_logs.len(),
+                snapshot.tracks.len(),
+                snapshot.projects.len(),
+                snapshot.inbox_items.len(),
+            );
+            let imported = Store::open_default()?.import_snapshot(snapshot)?;
+            gitee_sync::record_sync(
+                "pull",
+                true,
+                Some(&gist_id),
+                counts.0,
+                counts.1,
+                counts.2,
+                counts.3,
+                counts.4,
+                "",
+            );
+            Ok(GiteePullResult { gist_id, imported })
+        }
+        Err(error) => {
+            gitee_sync::record_sync("pull", false, None, 0, 0, 0, 0, 0, &error.to_string());
+            Err(error.into())
+        }
+    }
 }
 
 #[tauri::command]

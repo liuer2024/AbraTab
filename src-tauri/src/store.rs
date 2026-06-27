@@ -707,21 +707,68 @@ impl Store {
     }
 
     #[allow(dead_code)]
+    fn upsert_snapshot_project(&self, project: &Project) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO projects (id, name, path, git_url, description, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                path = excluded.path,
+                git_url = excluded.git_url,
+                description = excluded.description,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                project.id,
+                project.name,
+                project.path,
+                project.git_url,
+                project.description,
+                project.created_at,
+                project.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_inbox_item(&self, item: &InboxItem) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO inbox_items (id, source, title, body, read, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+                source = excluded.source,
+                title = excluded.title,
+                body = excluded.body,
+                read = excluded.read,
+                created_at = excluded.created_at
+            "#,
+            params![item.id, item.source, item.title, item.body, item.read, item.created_at],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 4,
+            schema: 5,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
             week_logs: self.list_week_logs(None)?,
             tracks: self.list_tracks(None)?,
             track_entries: self.list_all_track_entries()?,
+            projects: self.list_projects(None)?,
+            inbox_items: self.list_inbox_items(None)?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 4 {
+        if snapshot.schema == 0 || snapshot.schema > 5 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -777,6 +824,30 @@ impl Store {
                 result.skipped += 1;
             } else {
                 self.upsert_snapshot_track_entry(&entry)?;
+                result.inserted += 1;
+            }
+        }
+        for project in snapshot.projects {
+            match self.get_project(&project.id)? {
+                Some(existing) if existing.updated_at >= project.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_project(&project)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_project(&project)?;
+                    result.inserted += 1;
+                }
+            }
+        }
+        for item in snapshot.inbox_items {
+            // Inbox records are append-only, so an existing id is already here.
+            if self.get_inbox_item(&item.id)?.is_some() {
+                result.skipped += 1;
+            } else {
+                self.upsert_snapshot_inbox_item(&item)?;
                 result.inserted += 1;
             }
         }
@@ -1223,6 +1294,10 @@ pub struct SyncSnapshot {
     pub tracks: Vec<Track>,
     #[serde(default)]
     pub track_entries: Vec<TrackEntry>,
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default)]
+    pub inbox_items: Vec<InboxItem>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
