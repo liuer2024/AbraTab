@@ -95,6 +95,8 @@ pub struct InboxItem {
     pub source: String,
     pub title: String,
     pub body: String,
+    #[serde(default)]
+    pub format: String,
     pub read: bool,
     pub created_at: String,
 }

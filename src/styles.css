@@ -2254,6 +2254,74 @@ label,
   font-size: 12px;
 }
 
+.inbox-compose-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+}
+
+/* Let the markdown editor fill the height and match the app palette. */
+.inbox-compose-pane .w-md-editor {
+  flex: 1;
+  min-height: 0;
+  height: auto !important;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: none;
+  background: var(--panel-2);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+.inbox-compose-pane .w-md-editor-toolbar {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+}
+
+.inbox-compose-pane .w-md-editor-toolbar ul li button {
+  color: var(--ink-soft);
+}
+
+.inbox-compose-pane .w-md-editor-toolbar ul li button:hover,
+.inbox-compose-pane .w-md-editor-toolbar ul li.active button {
+  color: var(--accent);
+  background: var(--hover);
+}
+
+.inbox-compose-pane .w-md-editor-toolbar-divider {
+  background: var(--line);
+}
+
+.inbox-compose-pane .w-md-editor-content {
+  background: var(--panel-2);
+}
+
+.inbox-compose-pane .w-md-editor-text,
+.inbox-compose-pane .w-md-editor-text-pre,
+.inbox-compose-pane .w-md-editor-text-input,
+.inbox-compose-pane .w-md-editor-text-pre > code {
+  font-family: var(--font-mono) !important;
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  color: var(--ink) !important;
+}
+
+.inbox-detail-body .wmde-markdown {
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.inbox-detail-body .wmde-markdown img {
+  max-width: min(100%, 480px);
+  max-height: 400px;
+  cursor: zoom-in;
+}
+
 .lock-settings {
   display: flex;
   flex-direction: column;
@@ -2492,6 +2560,68 @@ label,
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Markdown-rendered body manages its own block spacing. */
+.inbox-detail-body.markdown-body {
+  white-space: normal;
+}
+
+.inbox-detail-body.markdown-body img {
+  max-width: min(100%, 480px);
+  max-height: 400px;
+  cursor: zoom-in;
+}
+
+.inbox-detail-body.markdown-body img.md-img-sized {
+  max-width: 100%;
+  max-height: none;
+}
+
+.inbox-cancel {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.inbox-cancel:hover {
+  background: var(--hover);
+}
+
+.inbox-format-toggle {
+  margin-right: 6px;
+}
+
+.inbox-format-toggle button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.inbox-text-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: var(--panel-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  outline: 0;
+  white-space: pre-wrap;
+}
+
+.inbox-text-editor:focus {
+  border-color: var(--accent-line);
 }
 
 .inbox-connect {

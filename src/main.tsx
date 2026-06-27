@@ -36,11 +36,14 @@ import {
   Settings,
   Star,
   Upload,
+  Tag,
   TerminalSquare,
   Trash2,
   Type,
   X,
 } from "lucide-react";
+import MDEditor, { commands } from "@uiw/react-md-editor";
+import "@uiw/react-md-editor/markdown-editor.css";
 import "./styles.css";
 
 type Snippet = {
@@ -216,6 +219,7 @@ type InboxItem = {
   source: string;
   title: string;
   body: string;
+  format: string;
   read: boolean;
   created_at: string;
 };
@@ -767,6 +771,14 @@ const translations = {
     inboxCopy: "复制",
     inboxCopied: "已复制",
     inboxDeleted: "已删除",
+    inboxNew: "新建",
+    inboxNewTitle: "标题（可选）",
+    inboxNewBody: "记点什么…（⌘/Ctrl+Enter 保存）",
+    inboxAdded: "已添加",
+    inboxEdit: "编辑",
+    inboxSaved: "已保存",
+    inboxFormatText: "文本",
+    inboxEmptyBody: "内容不能为空",
   },
   en: {
     snippets: "snippets",
@@ -1045,6 +1057,14 @@ const translations = {
     inboxCopy: "Copy",
     inboxCopied: "Copied",
     inboxDeleted: "Deleted",
+    inboxNew: "New",
+    inboxNewTitle: "Title (optional)",
+    inboxNewBody: "Jot something… (⌘/Ctrl+Enter to save)",
+    inboxAdded: "Added",
+    inboxEdit: "Edit",
+    inboxSaved: "Saved",
+    inboxFormatText: "Text",
+    inboxEmptyBody: "Content can't be empty",
   },
   ja: {
     snippets: "スニペット",
@@ -1323,6 +1343,14 @@ const translations = {
     inboxCopy: "コピー",
     inboxCopied: "コピーしました",
     inboxDeleted: "削除しました",
+    inboxNew: "新規",
+    inboxNewTitle: "タイトル（任意）",
+    inboxNewBody: "メモを入力…（⌘/Ctrl+Enter で保存）",
+    inboxAdded: "追加しました",
+    inboxEdit: "編集",
+    inboxSaved: "保存しました",
+    inboxFormatText: "テキスト",
+    inboxEmptyBody: "内容を入力してください",
   },
 } as const;
 
@@ -3681,6 +3709,28 @@ function WeekLogWorkspace({
   );
 }
 
+// Curated, tidier toolbar for the inbox markdown editor.
+const inboxMdCommands = [
+  commands.bold,
+  commands.italic,
+  commands.strikethrough,
+  commands.divider,
+  commands.title,
+  commands.link,
+  commands.quote,
+  commands.code,
+  commands.codeBlock,
+  commands.divider,
+  commands.image,
+  commands.table,
+  commands.divider,
+  commands.unorderedListCommand,
+  commands.orderedListCommand,
+  commands.checkedListCommand,
+];
+
+const inboxMdExtraCommands = [commands.codeEdit, commands.codePreview];
+
 function InboxWorkspace({
   text,
   locale,
@@ -3707,11 +3757,88 @@ function InboxWorkspace({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const [conn, setConn] = useState<InboxConnectionInfo | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeId, setComposeId] = useState<string | null>(null);
+  const [composeTitle, setComposeTitle] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeFormat, setComposeFormat] = useState<"markdown" | "text">("markdown");
+  const [uploading, setUploading] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const intl = localeTags[locale];
 
   function showError(error: unknown) {
     setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  function openCompose() {
+    setComposeId(null);
+    setComposeTitle("");
+    setComposeBody("");
+    setComposeFormat("markdown");
+    setSelectedId(null);
+    setComposeOpen(true);
+  }
+
+  function startEdit(item: InboxItem) {
+    setComposeId(item.id);
+    setComposeTitle(item.title);
+    setComposeBody(item.body);
+    setComposeFormat(item.format === "text" ? "text" : "markdown");
+    setComposeOpen(true);
+  }
+
+  async function saveCompose() {
+    if (!composeBody.trim()) {
+      setStatus(text.inboxEmptyBody);
+      return;
+    }
+    const title = composeTitle.trim();
+    const body = composeBody.trim();
+    try {
+      if (composeId) {
+        await invoke("update_inbox_item", { id: composeId, title, body, format: composeFormat });
+        setComposeOpen(false);
+        await refresh();
+        setSelectedId(composeId);
+        setStatus(text.inboxSaved);
+      } else {
+        const created = await invoke<InboxItem>("create_inbox_item", { title, body, format: composeFormat });
+        setComposeOpen(false);
+        await refresh();
+        setSelectedId(created.id);
+        setStatus(text.inboxAdded);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  // Paste an image → upload → insert a Markdown link at the caret.
+  async function handleImagePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const file = clipboardImage(event);
+    if (!file) return;
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    setUploading(true);
+    setStatus(text.weeklogImageUploading);
+    try {
+      const data = await fileToBase64(file);
+      const result = await invoke<UploadResult>("upload_image", {
+        filename: imageFilename(file),
+        data,
+      });
+      const snippet = `![](${result.url})\n`;
+      setComposeBody((value) => value.slice(0, start) + snippet + value.slice(end));
+      setStatus(text.weeklogImageUploaded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(/not configured/i.test(message) ? text.weeklogImageNotConfigured : message);
+    } finally {
+      setUploading(false);
+    }
   }
 
   function dateTimeLabel(value: string) {
@@ -3727,7 +3854,6 @@ function InboxWorkspace({
   }
 
   const selected = items.find((item) => item.id === selectedId) ?? null;
-  const unreadCount = items.filter((item) => !item.read).length;
 
   async function refresh(nextQuery = query) {
     const rows = await invoke<InboxItem[]>("list_inbox_items", { query: nextQuery.trim() || null });
@@ -3735,25 +3861,9 @@ function InboxWorkspace({
     return rows;
   }
 
-  async function selectItem(item: InboxItem) {
+  function selectItem(item: InboxItem) {
+    setComposeOpen(false);
     setSelectedId(item.id);
-    if (!item.read) {
-      try {
-        await invoke("set_inbox_read", { id: item.id, read: true });
-        setItems((current) => current.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
-      } catch (error) {
-        showError(error);
-      }
-    }
-  }
-
-  async function toggleRead(item: InboxItem) {
-    try {
-      await invoke("set_inbox_read", { id: item.id, read: !item.read });
-      setItems((current) => current.map((row) => (row.id === item.id ? { ...row, read: !item.read } : row)));
-    } catch (error) {
-      showError(error);
-    }
   }
 
   async function remove(item: InboxItem) {
@@ -3812,7 +3922,7 @@ args = ["mcp"]`;
           </div>
           <div data-tauri-drag-region>
             <h1>{text.appName}</h1>
-            <p>{items.length} {text.inboxUnit}{unreadCount > 0 ? ` · ${unreadCount} ${text.inboxUnread}` : ""}</p>
+            <p>{items.length} {text.inboxUnit}</p>
           </div>
         </div>
 
@@ -3851,6 +3961,9 @@ args = ["mcp"]`;
           <button className="add-button" onClick={() => void refresh().catch(showError)} title={text.inboxRefresh}>
             <RotateCcw size={16} />
           </button>
+          <button className="add-button" onClick={openCompose} title={text.inboxNew}>
+            <Plus size={17} />
+          </button>
         </div>
 
         <div className="snippet-list">
@@ -3862,7 +3975,6 @@ args = ["mcp"]`;
             >
               <div className="snippet-title-row">
                 <span className="snippet-title">
-                  {!item.read ? <span className="inbox-dot" /> : null}
                   {item.title.trim() || item.body.trim().split("\n")[0] || text.inboxUntitled}
                 </span>
               </div>
@@ -3881,19 +3993,51 @@ args = ["mcp"]`;
           <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
             <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
               <Inbox size={11} />
-              {selected ? selected.source : text.wsInbox}
+              {composeOpen
+                ? composeId
+                  ? text.inboxEdit
+                  : text.inboxNew
+                : selected
+                ? selected.source
+                : text.wsInbox}
             </div>
-            <input value={selected?.title ?? ""} placeholder={text.wsInbox} disabled readOnly />
+            <input
+              value={composeOpen ? composeTitle : selected?.title ?? ""}
+              onChange={(event) => composeOpen && setComposeTitle(event.target.value)}
+              placeholder={composeOpen ? text.inboxNewTitle : text.wsInbox}
+              disabled={!composeOpen && !selected}
+              readOnly={!composeOpen}
+            />
           </div>
           <div className="editor-tools">
-            {selected ? (
+            {composeOpen ? (
               <>
-                <button
-                  className="icon-button"
-                  title={selected.read ? text.inboxMarkUnread : text.inboxMarkRead}
-                  onClick={() => void toggleRead(selected)}
-                >
-                  <Check size={16} />
+                <div className="segmented inbox-format-toggle">
+                  <button
+                    className={composeFormat === "markdown" ? "selected" : ""}
+                    onClick={() => setComposeFormat("markdown")}
+                  >
+                    Markdown
+                  </button>
+                  <button
+                    className={composeFormat === "text" ? "selected" : ""}
+                    onClick={() => setComposeFormat("text")}
+                  >
+                    {text.inboxFormatText}
+                  </button>
+                </div>
+                <button type="button" className="inbox-cancel" onClick={() => setComposeOpen(false)}>
+                  {text.cancel}
+                </button>
+                <button className="snippet-save" onClick={() => void saveCompose()}>
+                  <Check size={14} />
+                  {text.save}
+                </button>
+              </>
+            ) : selected ? (
+              <>
+                <button className="icon-button" title={text.inboxEdit} onClick={() => startEdit(selected)}>
+                  <Pencil size={16} />
                 </button>
                 <button className="icon-button" title={text.inboxCopy} onClick={() => void copy(selected.body)}>
                   <Copy size={16} />
@@ -3907,14 +4051,79 @@ args = ["mcp"]`;
         </header>
 
         <div className="editor-body">
-          {selected ? (
+          {composeOpen ? (
+            <div className="inbox-compose-pane" data-color-mode="light">
+              {composeFormat === "markdown" ? (
+                <>
+                  <MDEditor
+                    className="inbox-md"
+                    value={composeBody}
+                    onChange={(value) => setComposeBody(value ?? "")}
+                    height="100%"
+                    preview="edit"
+                    visibleDragbar={false}
+                    commands={inboxMdCommands}
+                    extraCommands={inboxMdExtraCommands}
+                    textareaProps={{
+                      placeholder: text.inboxNewBody,
+                      onPaste: (event) => void handleImagePaste(event),
+                      onKeyDown: (event) => {
+                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                          event.preventDefault();
+                          void saveCompose();
+                        }
+                      },
+                    }}
+                  />
+                  <div className="entry-compose-hint">
+                    {uploading ? (
+                      text.weeklogImageUploading
+                    ) : (
+                      <>
+                        <ImagePlus size={12} />
+                        {text.weeklogImageHint}
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <textarea
+                  autoFocus
+                  className="inbox-text-editor"
+                  value={composeBody}
+                  onChange={(event) => setComposeBody(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      event.preventDefault();
+                      void saveCompose();
+                    }
+                  }}
+                  placeholder={text.inboxNewBody}
+                  spellCheck={false}
+                />
+              )}
+            </div>
+          ) : selected ? (
             <div className="inbox-detail">
               <div className="inbox-detail-meta">
                 <span className="inbox-source">{selected.source}</span>
                 <span>{dateTimeLabel(selected.created_at)}</span>
               </div>
               {selected.title.trim() ? <h3 className="inbox-detail-title">{selected.title}</h3> : null}
-              <div className="inbox-detail-body">{selected.body}</div>
+              {selected.format === "text" ? (
+                <div className="inbox-detail-body">{selected.body}</div>
+              ) : (
+                <div
+                  className="inbox-detail-body"
+                  data-color-mode="light"
+                  onClick={(event) => {
+                    const target = event.target as HTMLElement;
+                    if (target instanceof HTMLImageElement) setLightbox(target.src);
+                  }}
+                >
+                  <MDEditor.Markdown source={selected.body} />
+                </div>
+              )}
             </div>
           ) : (
             <div className="inbox-connect">
@@ -3970,12 +4179,19 @@ args = ["mcp"]`;
           <span className="status">{status ? <Check size={13} /> : null}{status}</span>
         </footer>
       </section>
+
+      {lightbox ? (
+        <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="" />
+        </div>
+      ) : null}
     </>
   );
 }
 
 function ProjectWorkspace({
   text,
+  locale,
   workspace,
   setWorkspace,
   mode,
@@ -4066,12 +4282,13 @@ function ProjectWorkspace({
       path: project.path,
       git_url: project.git_url,
       description: project.description,
+      tags: project.tags,
     });
   }
 
   function newProject() {
     setSelectedId(null);
-    setForm({ name: "", path: "", git_url: "", description: "" });
+    setForm({ name: "", path: "", git_url: "", description: "", tags: [] });
   }
 
   async function save() {
@@ -4088,6 +4305,7 @@ function ProjectWorkspace({
           path: form.path.trim(),
           git_url: form.git_url.trim(),
           description: form.description,
+          tags: form.tags,
         },
       });
       await refresh();

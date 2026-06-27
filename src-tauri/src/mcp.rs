@@ -124,7 +124,7 @@ fn handle_tool_call(store: &Store, params: Option<&Value>) -> Result<String> {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("mcp");
 
-    let item = store.add_inbox_item(source, title, &text)?;
+    let item = store.add_inbox_item(source, title, &text, "markdown")?;
     Ok(format!("Saved to AbraTab Inbox (id={}).", item.id))
 }
 

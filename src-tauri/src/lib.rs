@@ -187,6 +187,22 @@ fn list_inbox_items(query: Option<String>) -> Result<Vec<InboxItem>, AppError> {
 }
 
 #[tauri::command]
+fn create_inbox_item(title: String, body: String, format: String) -> Result<InboxItem, AppError> {
+    Ok(Store::open_default()?.add_inbox_item("app", &title, &body, &format)?)
+}
+
+#[tauri::command]
+fn update_inbox_item(
+    id: String,
+    title: String,
+    body: String,
+    format: String,
+) -> Result<(), AppError> {
+    Store::open_default()?.update_inbox_item(&id, &title, &body, &format)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn set_inbox_read(id: String, read: bool) -> Result<(), AppError> {
     Store::open_default()?.set_inbox_read(&id, read)?;
     Ok(())
@@ -781,9 +797,12 @@ pub fn run() {
             delete_project,
             open_path,
             list_inbox_items,
+            create_inbox_item,
+            update_inbox_item,
             set_inbox_read,
             delete_inbox_item,
             inbox_connection_info,
+            journal_activity,
             lock_state,
             set_master_password,
             verify_master_password,

@@ -105,7 +105,7 @@ fn main() -> Result<()> {
             if body.trim().is_empty() {
                 bail!("inbox requires text, e.g. abratab-cli inbox \"your note\"");
             }
-            let item = store.add_inbox_item(&source, &title, &body)?;
+            let item = store.add_inbox_item(&source, &title, &body, "markdown")?;
             println!("{}", item.id);
         }
         "mcp" => mcp::serve(store)?,

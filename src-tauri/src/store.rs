@@ -399,16 +399,18 @@ impl Store {
             .as_ref()
             .map(|project| project.created_at.clone())
             .unwrap_or_else(|| now.clone());
+        let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
 
         self.conn.execute(
             r#"
-            INSERT INTO projects (id, name, path, git_url, description, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO projects (id, name, path, git_url, description, tags, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path = excluded.path,
                 git_url = excluded.git_url,
                 description = excluded.description,
+                tags = excluded.tags,
                 updated_at = excluded.updated_at
             "#,
             params![
@@ -417,6 +419,7 @@ impl Store {
                 input.path.unwrap_or_default(),
                 input.git_url.unwrap_or_default(),
                 input.description.unwrap_or_default(),
+                tags,
                 created_at,
                 now,
             ],
@@ -433,16 +436,23 @@ impl Store {
     }
 
     #[allow(dead_code)]
-    pub fn add_inbox_item(&self, source: &str, title: &str, body: &str) -> Result<InboxItem> {
+    pub fn add_inbox_item(
+        &self,
+        source: &str,
+        title: &str,
+        body: &str,
+        format: &str,
+    ) -> Result<InboxItem> {
         let now = now_string();
         let id = new_inbox_id();
         let source = if source.trim().is_empty() { "unknown" } else { source.trim() };
+        let format = if format.trim().is_empty() { "markdown" } else { format.trim() };
         self.conn.execute(
             r#"
-            INSERT INTO inbox_items (id, source, title, body, read, created_at)
-            VALUES (?1, ?2, ?3, ?4, 0, ?5)
+            INSERT INTO inbox_items (id, source, title, body, format, read, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)
             "#,
-            params![id, source, title.trim(), body, now],
+            params![id, source, title.trim(), body, format, now],
         )?;
         self.get_inbox_item(&id)?.context("inbox item was not saved")
     }
@@ -452,7 +462,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, source, title, body, read, created_at
+                SELECT id, source, title, body, format, read, created_at
                 FROM inbox_items
                 WHERE id = ?1
                 "#,
@@ -469,7 +479,7 @@ impl Store {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, source, title, body, read, created_at
+                SELECT id, source, title, body, format, read, created_at
                 FROM inbox_items
                 WHERE lower(title) LIKE ?1
                    OR lower(body) LIKE ?1
@@ -484,7 +494,7 @@ impl Store {
         } else {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT id, source, title, body, read, created_at
+                SELECT id, source, title, body, format, read, created_at
                 FROM inbox_items
                 ORDER BY created_at DESC
                 "#,
@@ -502,6 +512,16 @@ impl Store {
         self.conn.execute(
             "UPDATE inbox_items SET read = ?2 WHERE id = ?1",
             params![id, read],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn update_inbox_item(&self, id: &str, title: &str, body: &str, format: &str) -> Result<()> {
+        let format = if format.trim().is_empty() { "markdown" } else { format.trim() };
+        self.conn.execute(
+            "UPDATE inbox_items SET title = ?2, body = ?3, format = ?4 WHERE id = ?1",
+            params![id, title.trim(), body, format],
         )?;
         Ok(())
     }
@@ -756,6 +776,7 @@ impl Store {
                 project.path,
                 project.git_url,
                 project.description,
+                tags,
                 project.created_at,
                 project.updated_at,
             ],
@@ -765,18 +786,20 @@ impl Store {
 
     #[allow(dead_code)]
     fn upsert_snapshot_inbox_item(&self, item: &InboxItem) -> Result<()> {
+        let format = if item.format.trim().is_empty() { "markdown" } else { item.format.trim() };
         self.conn.execute(
             r#"
-            INSERT INTO inbox_items (id, source, title, body, read, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO inbox_items (id, source, title, body, format, read, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(id) DO UPDATE SET
                 source = excluded.source,
                 title = excluded.title,
                 body = excluded.body,
+                format = excluded.format,
                 read = excluded.read,
                 created_at = excluded.created_at
             "#,
-            params![item.id, item.source, item.title, item.body, item.read, item.created_at],
+            params![item.id, item.source, item.title, item.body, format, item.read, item.created_at],
         )?;
         Ok(())
     }
@@ -1055,6 +1078,8 @@ impl Store {
         self.drop_week_logs_unique()?;
         // After any week_logs rebuild above, ensure the favorite column exists.
         self.add_column_if_missing("week_logs", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
+        self.add_column_if_missing("projects", "tags", "TEXT NOT NULL DEFAULT '[]'")?;
+        self.add_column_if_missing("inbox_items", "format", "TEXT NOT NULL DEFAULT 'markdown'")?;
 
         Ok(())
     }
