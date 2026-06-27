@@ -23,6 +23,7 @@ import {
   ImagePlus,
   Inbox,
   Info,
+  Lock,
   Monitor,
   NotebookText,
   Palette,
@@ -86,7 +87,7 @@ const blankForm: FormState = {
 };
 
 const tagColors = ["#C2693F", "#2F7DB5", "#C0497F", "#2F8DB0", "#7A5BB5", "#1F6B57"];
-type SettingsTab = "appearance" | "font" | "window" | "terminal" | "sync" | "images" | "about";
+type SettingsTab = "appearance" | "font" | "window" | "security" | "terminal" | "sync" | "images" | "about";
 type Locale = "zh" | "en" | "ja";
 type Theme = "graphite" | "notion" | "paper" | "mint" | "dusk" | "midnight";
 type LibraryView = "all" | "favorites" | "trash";
@@ -437,6 +438,7 @@ const settingsTabs: Array<{ id: SettingsTab; icon: React.ElementType }> = [
   { id: "appearance", icon: Palette },
   { id: "font", icon: Type },
   { id: "window", icon: Monitor },
+  { id: "security", icon: Lock },
   { id: "terminal", icon: TerminalSquare },
   { id: "sync", icon: Upload },
   { id: "images", icon: ImagePlus },
@@ -531,6 +533,7 @@ const translations = {
       appearance: "外观",
       font: "字体",
       window: "窗口",
+      security: "安全",
       terminal: "终端",
       sync: "同步",
       images: "图床",
@@ -540,6 +543,7 @@ const translations = {
       appearance: "主题、语言、强调色和密度。",
       font: "字体和编辑器阅读体验。",
       window: "窗口行为和标题栏。",
+      security: "锁定周记的主密码。",
       terminal: "注册 shell 集成和快捷词展开。",
       sync: "用 Gitee 代码片段同步片段、分类和标签。",
       images: "配置七牛云，周记里可直接粘贴图片。",
@@ -643,6 +647,29 @@ const translations = {
     weeklogTitlePlaceholder: "标题（可选）",
     weeklogBodyPlaceholder: "记录这一周做了什么、遇到了什么、下周打算做什么…",
     weeklogPickHint: "从左侧选择一篇，或点「新增」开始记录。",
+    lockSet: "加锁",
+    lockRemove: "解锁",
+    lockSetMaster: "设置主密码（所有加锁记录通用）",
+    lockEnterMaster: "输入主密码",
+    lockScreenTitle: "此记录已锁定",
+    lockUnlock: "解锁",
+    lockLocked: "已锁定",
+    lockRemoved: "已解锁",
+    lockWrong: "密码错误",
+    lockEmpty: "请输入密码",
+    lockMismatch: "两次输入的密码不一致",
+    lockPasswordPlaceholder: "密码",
+    lockConfirmPlaceholder: "再次输入密码",
+    lockNeedSetup: "请先到「设置 · 安全」设置锁密码",
+    lockSecurityHelp: "为锁定的周记设置一个主密码，所有加锁的周记都用它解锁。",
+    lockConfigured: "锁密码已设置",
+    lockCurrentPlaceholder: "当前密码",
+    lockNewPlaceholder: "新密码",
+    lockSetPassword: "设置密码",
+    lockChangePassword: "修改密码",
+    lockRemovePassword: "移除密码",
+    lockSaved: "已保存",
+    lockPasswordRemoved: "已移除锁密码",
     weeklogSaved: "已保存周记",
     weeklogDeleted: "已删除周记",
     weeklogEmpty: "请先填写标题或内容。",
@@ -782,6 +809,7 @@ const translations = {
       appearance: "Appearance",
       font: "Font",
       window: "Window",
+      security: "Security",
       terminal: "Terminal",
       sync: "Sync",
       images: "Image host",
@@ -791,6 +819,7 @@ const translations = {
       appearance: "Theme, language, accent, and density.",
       font: "Typeface and editor reading comfort.",
       window: "Window behavior and chrome.",
+      security: "Master password for locking notes.",
       terminal: "Register shell integrations and shortcut expansion.",
       sync: "Sync snippets, categories, and tags through a Gitee gist.",
       images: "Configure Qiniu so you can paste images into weekly logs.",
@@ -894,6 +923,29 @@ const translations = {
     weeklogTitlePlaceholder: "Title (optional)",
     weeklogBodyPlaceholder: "What you did this week, what came up, what's next…",
     weeklogPickHint: "Pick a note on the left, or hit New to start.",
+    lockSet: "Lock",
+    lockRemove: "Unlock",
+    lockSetMaster: "Set a master password (used for all locked notes)",
+    lockEnterMaster: "Enter master password",
+    lockScreenTitle: "This note is locked",
+    lockUnlock: "Unlock",
+    lockLocked: "Locked",
+    lockRemoved: "Unlocked",
+    lockWrong: "Wrong password",
+    lockEmpty: "Enter a password",
+    lockMismatch: "Passwords do not match",
+    lockPasswordPlaceholder: "Password",
+    lockConfirmPlaceholder: "Repeat password",
+    lockNeedSetup: "Set a lock password in Settings · Security first",
+    lockSecurityHelp: "Set a master password to lock weekly notes; all locked notes use it.",
+    lockConfigured: "Lock password is set",
+    lockCurrentPlaceholder: "Current password",
+    lockNewPlaceholder: "New password",
+    lockSetPassword: "Set password",
+    lockChangePassword: "Change password",
+    lockRemovePassword: "Remove password",
+    lockSaved: "Saved",
+    lockPasswordRemoved: "Lock password removed",
     weeklogSaved: "Saved weekly log",
     weeklogDeleted: "Deleted weekly log",
     weeklogEmpty: "Add a title or some content first.",
@@ -1033,6 +1085,7 @@ const translations = {
       appearance: "外観",
       font: "フォント",
       window: "ウィンドウ",
+      security: "セキュリティ",
       terminal: "ターミナル",
       sync: "同期",
       images: "画像ホスト",
@@ -1042,6 +1095,7 @@ const translations = {
       appearance: "テーマ、言語、アクセント、表示密度。",
       font: "書体とエディタの読みやすさ。",
       window: "ウィンドウ動作とタイトルバー。",
+      security: "ノートをロックするマスターパスワード。",
       terminal: "シェル連携とショートカット展開を登録します。",
       sync: "Gitee コードスニペットでスニペット、カテゴリ、タグを同期します。",
       images: "Qiniu を設定すると、週次ログに画像を貼り付けできます。",
@@ -1145,6 +1199,29 @@ const translations = {
     weeklogTitlePlaceholder: "タイトル（任意）",
     weeklogBodyPlaceholder: "今週やったこと、起きたこと、来週の予定…",
     weeklogPickHint: "左からノートを選ぶか、「新規」で書き始めます。",
+    lockSet: "ロック",
+    lockRemove: "ロック解除",
+    lockSetMaster: "マスターパスワードを設定（全ロックノート共通）",
+    lockEnterMaster: "マスターパスワードを入力",
+    lockScreenTitle: "このノートはロックされています",
+    lockUnlock: "ロック解除",
+    lockLocked: "ロックしました",
+    lockRemoved: "ロック解除しました",
+    lockWrong: "パスワードが違います",
+    lockEmpty: "パスワードを入力してください",
+    lockMismatch: "パスワードが一致しません",
+    lockPasswordPlaceholder: "パスワード",
+    lockConfirmPlaceholder: "パスワード（確認）",
+    lockNeedSetup: "先に「設定 · セキュリティ」でロックパスワードを設定してください",
+    lockSecurityHelp: "週次ノートをロックするためのマスターパスワードを設定します。全ロックノート共通です。",
+    lockConfigured: "ロックパスワード設定済み",
+    lockCurrentPlaceholder: "現在のパスワード",
+    lockNewPlaceholder: "新しいパスワード",
+    lockSetPassword: "パスワードを設定",
+    lockChangePassword: "パスワードを変更",
+    lockRemovePassword: "パスワードを削除",
+    lockSaved: "保存しました",
+    lockPasswordRemoved: "ロックパスワードを削除しました",
     weeklogSaved: "週次ログを保存しました",
     weeklogDeleted: "週次ログを削除しました",
     weeklogEmpty: "タイトルか本文を入力してください。",
@@ -1256,6 +1333,11 @@ function App() {
   const [alwaysOnTop, setAlwaysOnTop] = useState(readAlwaysOnTop);
   const [titleBarStyle, setTitleBarStyle] = useState<TitleBarPref>(readTitleBarStyle);
   const [autostart, setAutostart] = useState(false);
+  const [lockConfigured, setLockConfigured] = useState(false);
+  const [lockCur, setLockCur] = useState("");
+  const [lockNew, setLockNew] = useState("");
+  const [lockNew2, setLockNew2] = useState("");
+  const [lockMsg, setLockMsg] = useState("");
   const [locale, setLocale] = useState<Locale>("zh");
   const [theme, setTheme] = useState<Theme>("graphite");
   const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
@@ -1365,7 +1447,62 @@ function App() {
     if (settingsOpen && settingsTab === "images") {
       void refreshQiniuStatus();
     }
+    if (settingsOpen && settingsTab === "security") {
+      setLockCur("");
+      setLockNew("");
+      setLockNew2("");
+      setLockMsg("");
+      invoke<{ configured: boolean }>("lock_state")
+        .then((state) => setLockConfigured(state.configured))
+        .catch(showError);
+    }
   }, [settingsOpen, settingsTab]);
+
+  async function saveLockPassword() {
+    if (!lockNew) {
+      setLockMsg(text.lockEmpty);
+      return;
+    }
+    if (lockNew !== lockNew2) {
+      setLockMsg(text.lockMismatch);
+      return;
+    }
+    try {
+      if (lockConfigured) {
+        const ok = await invoke<boolean>("verify_master_password", { password: lockCur });
+        if (!ok) {
+          setLockMsg(text.lockWrong);
+          return;
+        }
+      }
+      await invoke("set_master_password", { password: lockNew });
+      setLockConfigured(true);
+      setLockCur("");
+      setLockNew("");
+      setLockNew2("");
+      setLockMsg(text.lockSaved);
+    } catch (error) {
+      setLockMsg(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function removeLockPassword() {
+    try {
+      const ok = await invoke<boolean>("verify_master_password", { password: lockCur });
+      if (!ok) {
+        setLockMsg(text.lockWrong);
+        return;
+      }
+      await invoke("clear_master_password");
+      setLockConfigured(false);
+      setLockCur("");
+      setLockNew("");
+      setLockNew2("");
+      setLockMsg(text.lockPasswordRemoved);
+    } catch (error) {
+      setLockMsg(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   // Populate the width/height inputs with the live window size when the Window tab opens.
   useEffect(() => {
@@ -2399,6 +2536,54 @@ function App() {
                 </div>
               ) : null}
 
+              {settingsTab === "security" ? (
+                <div className="settings-section">
+                  <div className="lock-settings">
+                    <p className="lock-settings-help">{text.lockSecurityHelp}</p>
+                    {lockConfigured ? (
+                      <div className="lock-status-row">
+                        <Lock size={14} />
+                        {text.lockConfigured}
+                      </div>
+                    ) : null}
+                    {lockConfigured ? (
+                      <input
+                        type="password"
+                        className="lock-input"
+                        value={lockCur}
+                        onChange={(event) => setLockCur(event.target.value)}
+                        placeholder={text.lockCurrentPlaceholder}
+                      />
+                    ) : null}
+                    <input
+                      type="password"
+                      className="lock-input"
+                      value={lockNew}
+                      onChange={(event) => setLockNew(event.target.value)}
+                      placeholder={lockConfigured ? text.lockNewPlaceholder : text.lockPasswordPlaceholder}
+                    />
+                    <input
+                      type="password"
+                      className="lock-input"
+                      value={lockNew2}
+                      onChange={(event) => setLockNew2(event.target.value)}
+                      placeholder={text.lockConfirmPlaceholder}
+                    />
+                    <div className="lock-settings-actions">
+                      <button className="settings-action" onClick={() => void saveLockPassword()}>
+                        {lockConfigured ? text.lockChangePassword : text.lockSetPassword}
+                      </button>
+                      {lockConfigured ? (
+                        <button className="settings-action muted" onClick={() => void removeLockPassword()}>
+                          {text.lockRemovePassword}
+                        </button>
+                      ) : null}
+                    </div>
+                    {lockMsg ? <div className="lock-settings-msg">{lockMsg}</div> : null}
+                  </div>
+                </div>
+              ) : null}
+
               {settingsTab === "terminal" ? (
                 <div className="settings-section terminal-panel">
                   <SettingRow title={text.terminalCli} detail={text.terminalCliDetail}>
@@ -2837,6 +3022,17 @@ function WeekLogWorkspace({
   const [uploading, setUploading] = useState(false);
   const [starredOnly, setStarredOnly] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; log: WeekLog } | null>(null);
+  const [lockedIds, setLockedIds] = useState<Set<string>>(() => new Set());
+  const [unlocked, setUnlocked] = useState(false);
+  const [pwdDialog, setPwdDialog] = useState<{
+    title: string;
+    confirm: boolean;
+    onSubmit: (password: string) => void | Promise<void>;
+  } | null>(null);
+  const [pwdValue, setPwdValue] = useState("");
+  const [pwdValue2, setPwdValue2] = useState("");
+  const [pwdError, setPwdError] = useState("");
 
   const intl = localeTags[locale];
 
@@ -2887,6 +3083,89 @@ function WeekLogWorkspace({
     } finally {
       setUploading(false);
     }
+  }
+
+  const isLocked = (id: string) => lockedIds.has(id);
+
+  async function refreshLock() {
+    const state = await invoke<{ configured: boolean; locked_ids: string[] }>("lock_state");
+    setLockedIds(new Set(state.locked_ids));
+  }
+
+  useEffect(() => {
+    void refreshLock().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function askPassword(
+    title: string,
+    confirm: boolean,
+    onSubmit: (password: string) => void | Promise<void>,
+  ) {
+    setPwdValue("");
+    setPwdValue2("");
+    setPwdError("");
+    setPwdDialog({ title, confirm, onSubmit });
+  }
+
+  async function submitPassword() {
+    if (!pwdDialog) return;
+    if (!pwdValue) {
+      setPwdError(text.lockEmpty);
+      return;
+    }
+    if (pwdDialog.confirm && pwdValue !== pwdValue2) {
+      setPwdError(text.lockMismatch);
+      return;
+    }
+    try {
+      await pwdDialog.onSubmit(pwdValue);
+      setPwdDialog(null);
+    } catch (error) {
+      setPwdError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function lockRecord(log: WeekLog) {
+    setContextMenu(null);
+    void (async () => {
+      const state = await invoke<{ configured: boolean }>("lock_state");
+      if (!state.configured) {
+        setStatus(text.lockNeedSetup);
+        return;
+      }
+      await invoke("set_week_log_locked", { id: log.id, locked: true });
+      setUnlocked(true);
+      await refreshLock();
+      setStatus(text.lockLocked);
+    })().catch(showError);
+  }
+
+  function removeLock(log: WeekLog) {
+    setContextMenu(null);
+    const doRemove = async () => {
+      await invoke("set_week_log_locked", { id: log.id, locked: false });
+      await refreshLock();
+      setStatus(text.lockRemoved);
+    };
+    if (unlocked) {
+      void doRemove().catch(showError);
+      return;
+    }
+    askPassword(text.lockEnterMaster, false, async (password) => {
+      const ok = await invoke<boolean>("verify_master_password", { password });
+      if (!ok) throw new Error(text.lockWrong);
+      setUnlocked(true);
+      await doRemove();
+    });
+  }
+
+  function unlockSession() {
+    askPassword(text.lockEnterMaster, false, async (password) => {
+      const ok = await invoke<boolean>("verify_master_password", { password });
+      if (!ok) throw new Error(text.lockWrong);
+      setUnlocked(true);
+    });
   }
 
   function parseDate(value: string) {
@@ -3075,9 +3354,16 @@ function WeekLogWorkspace({
                   key={log.id}
                   className={`snippet-item ${log.id === selectedId ? "selected" : ""}`}
                   onClick={() => loadIntoForm(log)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({ x: event.clientX, y: event.clientY, log });
+                  }}
                 >
                   <div className="snippet-title-row">
-                    <span className="snippet-title">{log.title.trim() || dateLabel(log.created_at) || text.wsWeeklog}</span>
+                    <span className="snippet-title">
+                      {isLocked(log.id) ? <Lock className="weeklog-lock" size={12} /> : null}
+                      {log.title.trim() || dateLabel(log.created_at) || text.wsWeeklog}
+                    </span>
                     {log.favorite ? <Star className="weeklog-star" size={13} fill="currentColor" /> : null}
                   </div>
                   <div className="snippet-meta">
@@ -3086,7 +3372,11 @@ function WeekLogWorkspace({
                       {dateLabel(log.created_at)}
                     </span>
                   </div>
-                  {log.body.trim() ? <div className="weeklog-preview">{log.body.trim().split("\n")[0]}</div> : null}
+                  {log.body.trim() ? (
+                    <div className={`weeklog-preview ${isLocked(log.id) && !unlocked ? "blurred" : ""}`}>
+                      {log.body.trim().split("\n")[0]}
+                    </div>
+                  ) : null}
                 </button>
               ))}
             </React.Fragment>
@@ -3140,6 +3430,15 @@ function WeekLogWorkspace({
 
         <div className="editor-body">
           {form ? (
+            selected && isLocked(selected.id) && !unlocked ? (
+              <div className="weeklog-locked">
+                <Lock size={30} />
+                <p>{text.lockScreenTitle}</p>
+                <button type="button" className="weeklog-save" onClick={unlockSession}>
+                  {text.lockUnlock}
+                </button>
+              </div>
+            ) : (
             <>
               <div className="code-card weeklog-card">
                 <div className="code-top">
@@ -3191,6 +3490,7 @@ function WeekLogWorkspace({
                 </button>
               </div>
             </>
+            )
           ) : (
             <div className="weeklog-empty-editor">{text.weeklogPickHint}</div>
           )}
@@ -3208,6 +3508,73 @@ function WeekLogWorkspace({
           <span className="status">{status ? <Check size={13} /> : null}{status}</span>
         </footer>
       </section>
+
+      {contextMenu ? (
+        <>
+          <div
+            className="context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div className="snippet-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            {isLocked(contextMenu.log.id) ? (
+              <button onClick={() => removeLock(contextMenu.log)}>
+                <Lock size={13} />
+                {text.lockRemove}
+              </button>
+            ) : (
+              <button onClick={() => lockRecord(contextMenu.log)}>
+                <Lock size={13} />
+                {text.lockSet}
+              </button>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {pwdDialog ? (
+        <div className="prompt-overlay" role="presentation" onMouseDown={() => setPwdDialog(null)}>
+          <form
+            className="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitPassword();
+            }}
+          >
+            <h3>{pwdDialog.title}</h3>
+            <input
+              autoFocus
+              type="password"
+              value={pwdValue}
+              onChange={(event) => setPwdValue(event.target.value)}
+              placeholder={text.lockPasswordPlaceholder}
+            />
+            {pwdDialog.confirm ? (
+              <input
+                type="password"
+                value={pwdValue2}
+                onChange={(event) => setPwdValue2(event.target.value)}
+                placeholder={text.lockConfirmPlaceholder}
+              />
+            ) : null}
+            {pwdError ? <div className="prompt-error">{pwdError}</div> : null}
+            <div className="prompt-actions">
+              <button type="button" className="prompt-cancel" onClick={() => setPwdDialog(null)}>
+                {text.cancel}
+              </button>
+              <button type="submit" className="prompt-confirm">
+                {text.confirm}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }

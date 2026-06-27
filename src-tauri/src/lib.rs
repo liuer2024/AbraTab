@@ -9,7 +9,11 @@ use models::{
     InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
     TrackInput, WeekLog, WeekLogInput,
 };
-use serde::Serialize;
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -200,6 +204,102 @@ fn inbox_connection_info() -> Result<InboxConnectionInfo, AppError> {
         cli_path: cli_path().display().to_string(),
         db_path: store::default_db_path()?.display().to_string(),
     })
+}
+
+// ── Weeklog soft lock (master password + locked id list, stored locally) ──
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct LockData {
+    #[serde(default)]
+    salt: String,
+    #[serde(default)]
+    hash: String,
+    #[serde(default)]
+    locked_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LockState {
+    configured: bool,
+    locked_ids: Vec<String>,
+}
+
+fn lock_file_path() -> anyhow::Result<PathBuf> {
+    Ok(store::default_db_path()?.with_file_name("lock.json"))
+}
+
+fn load_lock() -> LockData {
+    lock_file_path()
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn save_lock(data: &LockData) -> anyhow::Result<()> {
+    let path = lock_file_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(data)?)?;
+    Ok(())
+}
+
+fn salt_string() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}")
+}
+
+fn hash_password(salt: &str, password: &str) -> String {
+    type HmacSha1 = Hmac<Sha1>;
+    let mut mac = HmacSha1::new_from_slice(salt.as_bytes()).expect("hmac accepts any key length");
+    mac.update(password.as_bytes());
+    STANDARD.encode(mac.finalize().into_bytes())
+}
+
+#[tauri::command]
+fn lock_state() -> Result<LockState, AppError> {
+    let data = load_lock();
+    Ok(LockState {
+        configured: !data.hash.is_empty(),
+        locked_ids: data.locked_ids,
+    })
+}
+
+#[tauri::command]
+fn set_master_password(password: String) -> Result<(), AppError> {
+    let mut data = load_lock();
+    if data.salt.is_empty() {
+        data.salt = salt_string();
+    }
+    data.hash = hash_password(&data.salt, &password);
+    save_lock(&data).map_err(AppError::from)
+}
+
+#[tauri::command]
+fn verify_master_password(password: String) -> Result<bool, AppError> {
+    let data = load_lock();
+    if data.hash.is_empty() {
+        return Ok(false);
+    }
+    Ok(hash_password(&data.salt, &password) == data.hash)
+}
+
+#[tauri::command]
+fn clear_master_password() -> Result<(), AppError> {
+    save_lock(&LockData::default()).map_err(AppError::from)
+}
+
+#[tauri::command]
+fn set_week_log_locked(id: String, locked: bool) -> Result<(), AppError> {
+    let mut data = load_lock();
+    data.locked_ids.retain(|existing| existing != &id);
+    if locked {
+        data.locked_ids.push(id);
+    }
+    save_lock(&data).map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -679,6 +779,11 @@ pub fn run() {
             set_inbox_read,
             delete_inbox_item,
             inbox_connection_info,
+            lock_state,
+            set_master_password,
+            verify_master_password,
+            clear_master_password,
+            set_week_log_locked,
             get_autostart,
             set_autostart,
             current_week,
