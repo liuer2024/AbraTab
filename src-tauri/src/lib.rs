@@ -6,7 +6,8 @@ mod store;
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
 use qiniu::{QiniuStatus, UploadResult};
 use models::{
-    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
+    TrackInput, WeekLog, WeekLogInput,
 };
 use serde::Serialize;
 use std::fs;
@@ -151,6 +152,93 @@ fn set_week_log_favorite(id: String, favorite: bool) -> Result<(), AppError> {
 #[tauri::command]
 fn delete_week_log(id: String) -> Result<(), AppError> {
     Store::open_default()?.delete_week_log(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_projects(query: Option<String>) -> Result<Vec<Project>, AppError> {
+    Ok(Store::open_default()?.list_projects(query.as_deref())?)
+}
+
+#[tauri::command]
+fn save_project(input: ProjectInput) -> Result<Project, AppError> {
+    Ok(Store::open_default()?.save_project(input)?)
+}
+
+#[tauri::command]
+fn delete_project(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_project(&id)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InboxConnectionInfo {
+    cli_path: String,
+    db_path: String,
+}
+
+#[tauri::command]
+fn list_inbox_items(query: Option<String>) -> Result<Vec<InboxItem>, AppError> {
+    Ok(Store::open_default()?.list_inbox_items(query.as_deref())?)
+}
+
+#[tauri::command]
+fn set_inbox_read(id: String, read: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_inbox_read(&id, read)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_inbox_item(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_inbox_item(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn inbox_connection_info() -> Result<InboxConnectionInfo, AppError> {
+    Ok(InboxConnectionInfo {
+        cli_path: cli_path().display().to_string(),
+        db_path: store::default_db_path()?.display().to_string(),
+    })
+}
+
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> Result<bool, AppError> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| anyhow::anyhow!("failed to read autostart state: {error}").into())
+}
+
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), AppError> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    result.map_err(|error| anyhow::anyhow!("failed to update autostart: {error}").into())
+}
+
+/// Reveal a directory in the OS file manager (Finder / Explorer / xdg-open).
+#[tauri::command]
+fn open_path(path: String) -> Result<(), AppError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!("path is empty").into());
+    }
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let program = "xdg-open";
+    Command::new(program)
+        .arg(trimmed)
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("failed to open {trimmed}: {error}"))?;
     Ok(())
 }
 
@@ -486,6 +574,19 @@ fn cli_path() -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // Persist and restore the window size (width/height) and position.
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION,
+                )
+                .build(),
+        )
         .setup(|app| {
             Store::open_default().map_err(|error| {
                 tauri::Error::Anyhow(anyhow::anyhow!("failed to initialize database: {error}"))
@@ -509,6 +610,16 @@ pub fn run() {
             save_week_log,
             set_week_log_favorite,
             delete_week_log,
+            list_projects,
+            save_project,
+            delete_project,
+            open_path,
+            list_inbox_items,
+            set_inbox_read,
+            delete_inbox_item,
+            inbox_connection_info,
+            get_autostart,
+            set_autostart,
             current_week,
             list_tracks,
             save_track,

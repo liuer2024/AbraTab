@@ -1,5 +1,6 @@
 use crate::models::{
-    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
+    TrackInput, WeekLog, WeekLogInput,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -331,6 +332,183 @@ impl Store {
     pub fn delete_week_log(&self, id: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM week_logs WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn list_projects(&self, query: Option<&str>) -> Result<Vec<Project>> {
+        let projects = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+            let pattern = format!("%{}%", query.trim().to_lowercase());
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, name, path, git_url, description, created_at, updated_at
+                FROM projects
+                WHERE lower(name) LIKE ?1
+                   OR lower(path) LIKE ?1
+                   OR lower(git_url) LIKE ?1
+                   OR lower(description) LIKE ?1
+                ORDER BY updated_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map(params![pattern], row_to_project)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        } else {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, name, path, git_url, description, created_at, updated_at
+                FROM projects
+                ORDER BY updated_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map([], row_to_project)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        Ok(projects)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, name, path, git_url, description, created_at, updated_at
+                FROM projects
+                WHERE id = ?1
+                "#,
+                params![id],
+                row_to_project,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    pub fn save_project(&self, input: ProjectInput) -> Result<Project> {
+        let now = now_string();
+        let id = input
+            .id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(new_project_id);
+        let existing = self.get_project(&id)?;
+        let created_at = existing
+            .as_ref()
+            .map(|project| project.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+
+        self.conn.execute(
+            r#"
+            INSERT INTO projects (id, name, path, git_url, description, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                path = excluded.path,
+                git_url = excluded.git_url,
+                description = excluded.description,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                id,
+                input.name,
+                input.path.unwrap_or_default(),
+                input.git_url.unwrap_or_default(),
+                input.description.unwrap_or_default(),
+                created_at,
+                now,
+            ],
+        )?;
+
+        self.get_project(&id)?.context("project was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_project(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM projects WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn add_inbox_item(&self, source: &str, title: &str, body: &str) -> Result<InboxItem> {
+        let now = now_string();
+        let id = new_inbox_id();
+        let source = if source.trim().is_empty() { "unknown" } else { source.trim() };
+        self.conn.execute(
+            r#"
+            INSERT INTO inbox_items (id, source, title, body, read, created_at)
+            VALUES (?1, ?2, ?3, ?4, 0, ?5)
+            "#,
+            params![id, source, title.trim(), body, now],
+        )?;
+        self.get_inbox_item(&id)?.context("inbox item was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn get_inbox_item(&self, id: &str) -> Result<Option<InboxItem>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, source, title, body, read, created_at
+                FROM inbox_items
+                WHERE id = ?1
+                "#,
+                params![id],
+                row_to_inbox_item,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    pub fn list_inbox_items(&self, query: Option<&str>) -> Result<Vec<InboxItem>> {
+        let items = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+            let pattern = format!("%{}%", query.trim().to_lowercase());
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, source, title, body, read, created_at
+                FROM inbox_items
+                WHERE lower(title) LIKE ?1
+                   OR lower(body) LIKE ?1
+                   OR lower(source) LIKE ?1
+                ORDER BY created_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map(params![pattern], row_to_inbox_item)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        } else {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, source, title, body, read, created_at
+                FROM inbox_items
+                ORDER BY created_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map([], row_to_inbox_item)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        Ok(items)
+    }
+
+    #[allow(dead_code)]
+    pub fn set_inbox_read(&self, id: &str, read: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE inbox_items SET read = ?2 WHERE id = ?1",
+            params![id, read],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_inbox_item(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM inbox_items WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -745,6 +923,29 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS tracks_updated_idx ON tracks(updated_at);
             CREATE INDEX IF NOT EXISTS track_entries_track_idx ON track_entries(track_id);
+
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL DEFAULT '',
+                git_url TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS projects_updated_idx ON projects(updated_at);
+
+            CREATE TABLE IF NOT EXISTS inbox_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS inbox_created_idx ON inbox_items(created_at);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
@@ -885,6 +1086,18 @@ fn new_track_id() -> String {
 }
 
 #[allow(dead_code)]
+fn new_project_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("prj_{nanos:x}")
+}
+
+#[allow(dead_code)]
+fn new_inbox_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("inb_{nanos:x}")
+}
+
+#[allow(dead_code)]
 fn new_entry_id() -> String {
     let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
     format!("tren_{nanos:x}")
@@ -898,6 +1111,31 @@ fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         updated_at: row.get(3)?,
         entry_count: row.get(4)?,
         last_entry_at: row.get(5)?,
+    })
+}
+
+#[allow(dead_code)]
+fn row_to_inbox_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxItem> {
+    Ok(InboxItem {
+        id: row.get(0)?,
+        source: row.get(1)?,
+        title: row.get(2)?,
+        body: row.get(3)?,
+        read: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
+#[allow(dead_code)]
+fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        path: row.get(2)?,
+        git_url: row.get(3)?,
+        description: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 

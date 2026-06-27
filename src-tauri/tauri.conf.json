@@ -19,6 +19,7 @@
           "x": 16,
           "y": 16
         },
+        "resizable": true,
         "width": 1180,
         "height": 780,
         "minWidth": 940,

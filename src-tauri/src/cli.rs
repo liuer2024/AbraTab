@@ -1,3 +1,4 @@
+mod mcp;
 mod models;
 mod store;
 
@@ -89,6 +90,25 @@ fn main() -> Result<()> {
             let category = required(args.next(), "category requires a category")?;
             store.set_category(&id, &category)?;
         }
+        "inbox" => {
+            let mut source = String::from("cli");
+            let mut title = String::new();
+            let mut body_parts: Vec<String> = Vec::new();
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--source" | "-s" => source = required(args.next(), "--source requires a value")?,
+                    "--title" | "-t" => title = required(args.next(), "--title requires a value")?,
+                    other => body_parts.push(other.to_string()),
+                }
+            }
+            let body = body_parts.join(" ");
+            if body.trim().is_empty() {
+                bail!("inbox requires text, e.g. abratab-cli inbox \"your note\"");
+            }
+            let item = store.add_inbox_item(&source, &title, &body)?;
+            println!("{}", item.id);
+        }
+        "mcp" => mcp::serve(store)?,
         "db-path" => println!("{}", store::default_db_path()?.display()),
         "help" | "--help" | "-h" => print_help(),
         other => bail!("unknown command: {other}"),
@@ -113,7 +133,7 @@ fn print_snippets(snippets: &[models::Snippet]) {
 
 fn print_help() {
     println!(
-        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  expand <shortcut> [shell]\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  pin <id> [on|off]\n  category <id> <category>\n  db-path"
+        "AbraTab CLI\n\nCommands:\n  list\n  search <query>\n  print <id>\n  copy <id>\n  expand <shortcut> [shell]\n  add <title> <body>\n  delete <id>\n  restore <id>\n  purge <id>\n  favorite <id> [on|off]\n  pin <id> [on|off]\n  category <id> <category>\n  inbox [--source <s>] [--title <t>] <text>\n  mcp\n  db-path"
     );
 }
 

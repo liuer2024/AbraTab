@@ -60,6 +60,37 @@ pub struct WeekLogInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub git_url: String,
+    pub description: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ProjectInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub path: Option<String>,
+    pub git_url: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboxItem {
+    pub id: String,
+    pub source: String,
+    pub title: String,
+    pub body: String,
+    pub read: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
     pub title: String,
