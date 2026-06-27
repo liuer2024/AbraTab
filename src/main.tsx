@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Activity,
   CalendarDays,
@@ -10,13 +10,18 @@ import {
   Check,
   ChevronRight,
   Code2,
+  Copy,
   Database,
   Download,
   Eye,
   FilePlus2,
   Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
   Grid2X2,
   ImagePlus,
+  Inbox,
   Info,
   Monitor,
   NotebookText,
@@ -108,12 +113,29 @@ type TerminalDependencyStatus = {
   install_command: string;
 };
 
+type SyncCounts = {
+  snippet_count: number;
+  week_log_count: number;
+  track_count: number;
+  project_count: number;
+  inbox_count: number;
+};
+
+type SyncLogEntry = SyncCounts & {
+  at: string;
+  action: string;
+  ok: boolean;
+  gist_id: string | null;
+  message: string;
+};
+
 type GiteeSyncStatus = {
   configured: boolean;
   gist_id: string | null;
   description: string;
   public: boolean;
   config_path: string;
+  last_sync: SyncLogEntry | null;
 };
 
 type GiteePullResult = {
@@ -140,7 +162,7 @@ type UploadResult = {
 };
 
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "track";
+type JournalMode = "weeklog" | "track" | "project" | "inbox";
 
 type WeekLog = {
   id: string;
@@ -165,6 +187,38 @@ type WeekForm = {
   id?: string;
   title: string;
   body: string;
+};
+
+type Project = {
+  id: string;
+  name: string;
+  path: string;
+  git_url: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectForm = {
+  id?: string;
+  name: string;
+  path: string;
+  git_url: string;
+  description: string;
+};
+
+type InboxItem = {
+  id: string;
+  source: string;
+  title: string;
+  body: string;
+  read: boolean;
+  created_at: string;
+};
+
+type InboxConnectionInfo = {
+  cli_path: string;
+  db_path: string;
 };
 
 type Track = {
@@ -198,6 +252,66 @@ function readDefaultWorkspace(): Workspace {
 function writeDefaultWorkspace(value: Workspace) {
   try {
     localStorage.setItem(DEFAULT_WORKSPACE_KEY, value);
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
+const ALWAYS_ON_TOP_KEY = "abratab.alwaysOnTop";
+const TITLE_BAR_STYLE_KEY = "abratab.titleBarStyle";
+
+type TitleBarPref = "overlay" | "visible";
+
+function readAlwaysOnTop(): boolean {
+  try {
+    return localStorage.getItem(ALWAYS_ON_TOP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAlwaysOnTop(value: boolean) {
+  try {
+    localStorage.setItem(ALWAYS_ON_TOP_KEY, value ? "1" : "0");
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
+// Build a "3 周记 · 3 奇思妙想 · 3 收件箱" summary, hiding categories with no data.
+function syncBreakdown(counts: SyncCounts, text: Strings): string {
+  const parts: string[] = [];
+  if (counts.snippet_count) parts.push(`${counts.snippet_count} ${text.snippets}`);
+  if (counts.week_log_count) parts.push(`${counts.week_log_count} ${text.wsWeeklog}`);
+  if (counts.track_count) parts.push(`${counts.track_count} ${text.wsTrack}`);
+  if (counts.project_count) parts.push(`${counts.project_count} ${text.wsProject}`);
+  if (counts.inbox_count) parts.push(`${counts.inbox_count} ${text.wsInbox}`);
+  return parts.length ? parts.join(" · ") : text.giteeNoData;
+}
+
+function formatSyncTime(value: string, locale: Locale): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(localeTags[locale], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function readTitleBarStyle(): TitleBarPref {
+  try {
+    return localStorage.getItem(TITLE_BAR_STYLE_KEY) === "visible" ? "visible" : "overlay";
+  } catch {
+    return "overlay";
+  }
+}
+
+function writeTitleBarStyle(value: TitleBarPref) {
+  try {
+    localStorage.setItem(TITLE_BAR_STYLE_KEY, value);
   } catch {
     /* localStorage unavailable; ignore */
   }
@@ -357,6 +471,7 @@ function buildCategoryTree(snippets: Snippet[]) {
 const translations = {
   zh: {
     snippets: "片段",
+    appName: "妙手",
     library: "资源库",
     allSnippets: "所有片段",
     favorites: "收藏",
@@ -399,7 +514,7 @@ const translations = {
     permanentlyDeleted: "已彻底删除片段。",
     copied: "已复制正文到剪贴板。",
     noSnippets: "没有找到片段",
-    settingsSubtitle: "AbraTab 偏好设置",
+    settingsSubtitle: "妙手 偏好设置",
     close: "关闭",
     settingsTabs: {
       appearance: "外观",
@@ -438,6 +553,11 @@ const translations = {
     giteeDescriptionPlaceholder: "AbraTab sync data",
     giteeSaved: "已保存 Gitee 同步配置。",
     giteePushed: "已推送到 Gitee",
+    giteePushing: "推送中…",
+    giteePulling: "拉取中…",
+    giteeSyncOk: "成功",
+    giteeSyncFail: "失败",
+    giteeNoData: "无数据",
     giteePulled: "已从 Gitee 拉取",
     terminalCli: "命令行工具",
     terminalCliDetail: "Tab 展开依赖本地 abratab-cli。",
@@ -484,6 +604,11 @@ const translations = {
     editorSizeDetail: "调整代码编辑区字号。",
     launchAtLogin: "开机启动",
     launchAtLoginDetail: "macOS 启动时打开 AbraTab。",
+    windowSize: "窗口尺寸",
+    windowSizeDetail: "宽 × 高（像素），应用后下次启动按此尺寸打开。",
+    windowSizeApply: "应用",
+    windowSizeApplied: "已调整窗口尺寸",
+    windowSizeInvalid: "宽至少 940，高至少 620",
     alwaysOnTop: "窗口置顶",
     alwaysOnTopDetail: "让片段窗口保持在其他窗口上方。",
     windowChrome: "窗口样式",
@@ -558,9 +683,46 @@ const translations = {
     entryDeleted: "已删除记录",
     entrySaved: "已更新记录",
     editEntry: "编辑记录",
+    wsProject: "项目坞",
+    projectUnit: "个项目",
+    newProject: "新建项目",
+    searchProjects: "搜索项目…",
+    noProjects: "还没有项目，新建一个开始登记。",
+    projectUntitled: "未命名项目",
+    projectNoPath: "未设置目录",
+    projectNamePlaceholder: "项目名称",
+    projectPath: "本地目录",
+    projectPathPlaceholder: "/Users/you/code/my-project",
+    projectGitUrl: "Git 地址",
+    projectGitPlaceholder: "https://github.com/you/my-project.git",
+    projectDesc: "备注",
+    projectDescPlaceholder: "记下项目用途、技术栈等…",
+    projectOpenFolder: "打开文件夹",
+    projectPickHint: "从左侧选择一个项目，或新建一个开始登记。",
+    projectEmpty: "项目名称、目录或 Git 地址至少填一个",
+    projectSaved: "已保存项目",
+    projectDeleted: "已删除项目",
+    wsInbox: "收件箱",
+    inboxUnit: "条",
+    inboxUnread: "未读",
+    inboxRefresh: "刷新",
+    searchInbox: "搜索收件箱…",
+    noInbox: "收件箱还是空的。让 Claude / Codex 推一条进来试试。",
+    inboxUntitled: "无标题",
+    inboxPickHint: "从左侧选择一条记录查看，或按下面任意一种方式从 Claude / Codex 写入。",
+    inboxConnectCliLabel: "命令行（最简单，让 AI 顺手敲一句）",
+    inboxConnectMcpClaude: "MCP · Claude Code（写入 ~/.claude.json 或项目 .mcp.json）",
+    inboxConnectMcpCodex: "MCP · Codex（写入 ~/.codex/config.toml）",
+    inboxConnectNote: "MCP 配好后，Claude / Codex 会把“存到 AbraTab”当成一个工具自动调用，无需每次手动敲命令。",
+    inboxMarkRead: "标为已读",
+    inboxMarkUnread: "标为未读",
+    inboxCopy: "复制",
+    inboxCopied: "已复制",
+    inboxDeleted: "已删除",
   },
   en: {
     snippets: "snippets",
+    appName: "AbraTab",
     library: "Library",
     allSnippets: "All snippets",
     favorites: "Favorites",
@@ -642,6 +804,11 @@ const translations = {
     giteeDescriptionPlaceholder: "AbraTab sync data",
     giteeSaved: "Saved Gitee sync config.",
     giteePushed: "Pushed to Gitee",
+    giteePushing: "Pushing…",
+    giteePulling: "Pulling…",
+    giteeSyncOk: "Success",
+    giteeSyncFail: "Failed",
+    giteeNoData: "no data",
     giteePulled: "Pulled from Gitee",
     terminalCli: "CLI",
     terminalCliDetail: "Tab expansion depends on the local abratab-cli binary.",
@@ -688,6 +855,11 @@ const translations = {
     editorSizeDetail: "Adjust code editor text size.",
     launchAtLogin: "Launch at login",
     launchAtLoginDetail: "Open AbraTab when macOS starts.",
+    windowSize: "Window size",
+    windowSizeDetail: "Width × height (px). Applied size is restored on next launch.",
+    windowSizeApply: "Apply",
+    windowSizeApplied: "Window size updated",
+    windowSizeInvalid: "Width ≥ 940, height ≥ 620",
     alwaysOnTop: "Always on top",
     alwaysOnTopDetail: "Keep the snippet window above other windows.",
     windowChrome: "Window chrome",
@@ -762,9 +934,46 @@ const translations = {
     entryDeleted: "Deleted entry",
     entrySaved: "Updated entry",
     editEntry: "Edit entry",
+    wsProject: "Projects",
+    projectUnit: "projects",
+    newProject: "New project",
+    searchProjects: "Search projects…",
+    noProjects: "No projects yet. Create one to get started.",
+    projectUntitled: "Untitled project",
+    projectNoPath: "No directory set",
+    projectNamePlaceholder: "Project name",
+    projectPath: "Local directory",
+    projectPathPlaceholder: "/Users/you/code/my-project",
+    projectGitUrl: "Git URL",
+    projectGitPlaceholder: "https://github.com/you/my-project.git",
+    projectDesc: "Notes",
+    projectDescPlaceholder: "Note the purpose, tech stack, etc…",
+    projectOpenFolder: "Open folder",
+    projectPickHint: "Select a project on the left, or create a new one.",
+    projectEmpty: "Enter at least a name, directory, or Git URL",
+    projectSaved: "Project saved",
+    projectDeleted: "Project deleted",
+    wsInbox: "Inbox",
+    inboxUnit: "items",
+    inboxUnread: "unread",
+    inboxRefresh: "Refresh",
+    searchInbox: "Search inbox…",
+    noInbox: "Inbox is empty. Try pushing one from Claude / Codex.",
+    inboxUntitled: "Untitled",
+    inboxPickHint: "Select a record to view, or push from Claude / Codex using any method below.",
+    inboxConnectCliLabel: "CLI (simplest — have the agent run a command)",
+    inboxConnectMcpClaude: "MCP · Claude Code (add to ~/.claude.json or project .mcp.json)",
+    inboxConnectMcpCodex: "MCP · Codex (add to ~/.codex/config.toml)",
+    inboxConnectNote: "Once MCP is configured, Claude / Codex call “save to AbraTab” as a tool automatically — no need to type a command each time.",
+    inboxMarkRead: "Mark as read",
+    inboxMarkUnread: "Mark as unread",
+    inboxCopy: "Copy",
+    inboxCopied: "Copied",
+    inboxDeleted: "Deleted",
   },
   ja: {
     snippets: "スニペット",
+    appName: "AbraTab",
     library: "ライブラリ",
     allSnippets: "すべてのスニペット",
     favorites: "お気に入り",
@@ -846,6 +1055,11 @@ const translations = {
     giteeDescriptionPlaceholder: "AbraTab sync data",
     giteeSaved: "Gitee 同期設定を保存しました。",
     giteePushed: "Gitee へプッシュしました",
+    giteePushing: "プッシュ中…",
+    giteePulling: "プル中…",
+    giteeSyncOk: "成功",
+    giteeSyncFail: "失敗",
+    giteeNoData: "データなし",
     giteePulled: "Gitee から取得しました",
     terminalCli: "CLI",
     terminalCliDetail: "Tab 展開にはローカルの abratab-cli が必要です。",
@@ -892,6 +1106,11 @@ const translations = {
     editorSizeDetail: "コードエディタの文字サイズを調整します。",
     launchAtLogin: "ログイン時に起動",
     launchAtLoginDetail: "macOS 起動時に AbraTab を開きます。",
+    windowSize: "ウィンドウサイズ",
+    windowSizeDetail: "幅 × 高さ（px）。適用したサイズは次回起動時に復元されます。",
+    windowSizeApply: "適用",
+    windowSizeApplied: "ウィンドウサイズを変更しました",
+    windowSizeInvalid: "幅は 940 以上、高さは 620 以上",
     alwaysOnTop: "常に手前に表示",
     alwaysOnTopDetail: "スニペットウィンドウを他のウィンドウの前に保ちます。",
     windowChrome: "ウィンドウ表示",
@@ -966,6 +1185,42 @@ const translations = {
     entryDeleted: "記録を削除しました",
     entrySaved: "記録を更新しました",
     editEntry: "記録を編集",
+    wsProject: "プロジェクト",
+    projectUnit: "件",
+    newProject: "新規プロジェクト",
+    searchProjects: "プロジェクトを検索…",
+    noProjects: "まだプロジェクトがありません。新規作成しましょう。",
+    projectUntitled: "無題のプロジェクト",
+    projectNoPath: "ディレクトリ未設定",
+    projectNamePlaceholder: "プロジェクト名",
+    projectPath: "ローカルディレクトリ",
+    projectPathPlaceholder: "/Users/you/code/my-project",
+    projectGitUrl: "Git URL",
+    projectGitPlaceholder: "https://github.com/you/my-project.git",
+    projectDesc: "メモ",
+    projectDescPlaceholder: "用途や技術スタックなどをメモ…",
+    projectOpenFolder: "フォルダを開く",
+    projectPickHint: "左側からプロジェクトを選ぶか、新規作成してください。",
+    projectEmpty: "名前・ディレクトリ・Git URL のいずれかを入力してください",
+    projectSaved: "プロジェクトを保存しました",
+    projectDeleted: "プロジェクトを削除しました",
+    wsInbox: "受信箱",
+    inboxUnit: "件",
+    inboxUnread: "未読",
+    inboxRefresh: "更新",
+    searchInbox: "受信箱を検索…",
+    noInbox: "受信箱は空です。Claude / Codex から送ってみましょう。",
+    inboxUntitled: "無題",
+    inboxPickHint: "左から記録を選ぶか、下のいずれかの方法で Claude / Codex から送信してください。",
+    inboxConnectCliLabel: "CLI（最も簡単 — エージェントにコマンドを実行させる）",
+    inboxConnectMcpClaude: "MCP · Claude Code（~/.claude.json またはプロジェクトの .mcp.json に追加）",
+    inboxConnectMcpCodex: "MCP · Codex（~/.codex/config.toml に追加）",
+    inboxConnectNote: "MCP を設定すると、Claude / Codex が「AbraTab に保存」をツールとして自動的に呼び出します。毎回コマンドを入力する必要はありません。",
+    inboxMarkRead: "既読にする",
+    inboxMarkUnread: "未読にする",
+    inboxCopy: "コピー",
+    inboxCopied: "コピーしました",
+    inboxDeleted: "削除しました",
   },
 } as const;
 
@@ -985,6 +1240,11 @@ function App() {
   const [status, setStatus] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
+  const [windowWidth, setWindowWidth] = useState("");
+  const [windowHeight, setWindowHeight] = useState("");
+  const [alwaysOnTop, setAlwaysOnTop] = useState(readAlwaysOnTop);
+  const [titleBarStyle, setTitleBarStyle] = useState<TitleBarPref>(readTitleBarStyle);
+  const [autostart, setAutostart] = useState(false);
   const [locale, setLocale] = useState<Locale>("zh");
   const [theme, setTheme] = useState<Theme>("graphite");
   const [terminalStatuses, setTerminalStatuses] = useState<TerminalIntegrationStatus[]>([]);
@@ -996,6 +1256,7 @@ function App() {
   const [giteeDescription, setGiteeDescription] = useState("AbraTab sync data");
   const [giteePublic, setGiteePublic] = useState(false);
   const [giteeMessage, setGiteeMessage] = useState("");
+  const [giteeSyncing, setGiteeSyncing] = useState<"push" | "pull" | null>(null);
   const [qiniuStatus, setQiniuStatus] = useState<QiniuStatus | null>(null);
   const [qiniuAccessKey, setQiniuAccessKey] = useState("");
   const [qiniuSecretKey, setQiniuSecretKey] = useState("");
@@ -1066,6 +1327,20 @@ function App() {
     invoke<string>("database_path").then(setDbPath).catch(showError);
   }, []);
 
+  // Cmd/Ctrl+, toggles Settings (macOS Preferences convention); Escape closes it.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen((open) => !open);
+      } else if (event.key === "Escape") {
+        setSettingsOpen((open) => (open ? false : open));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   useEffect(() => {
     if (settingsOpen && settingsTab === "terminal") {
       void refreshTerminalStatus();
@@ -1080,6 +1355,72 @@ function App() {
       void refreshQiniuStatus();
     }
   }, [settingsOpen, settingsTab]);
+
+  // Populate the width/height inputs with the live window size when the Window tab opens.
+  useEffect(() => {
+    if (!settingsOpen || settingsTab !== "window") return;
+    void (async () => {
+      const win = getCurrentWindow();
+      const size = (await win.innerSize()).toLogical(await win.scaleFactor());
+      setWindowWidth(String(Math.round(size.width)));
+      setWindowHeight(String(Math.round(size.height)));
+    })().catch(showError);
+  }, [settingsOpen, settingsTab]);
+
+  async function applyWindowSize() {
+    const width = Math.round(Number(windowWidth));
+    const height = Math.round(Number(windowHeight));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 940 || height < 620) {
+      setStatus(text.windowSizeInvalid);
+      return;
+    }
+    try {
+      await getCurrentWindow().setSize(new LogicalSize(width, height));
+      setWindowWidth(String(width));
+      setWindowHeight(String(height));
+      setStatus(text.windowSizeApplied);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  // Apply saved window preferences on startup and read the OS autostart state.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    void win.setAlwaysOnTop(alwaysOnTop).catch(showError);
+    void win.setTitleBarStyle(titleBarStyle).catch(showError);
+    invoke<boolean>("get_autostart").then(setAutostart).catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function toggleAlwaysOnTop(next: boolean) {
+    setAlwaysOnTop(next);
+    writeAlwaysOnTop(next);
+    try {
+      await getCurrentWindow().setAlwaysOnTop(next);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function changeTitleBarStyle(next: TitleBarPref) {
+    setTitleBarStyle(next);
+    writeTitleBarStyle(next);
+    try {
+      await getCurrentWindow().setTitleBarStyle(next);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function toggleAutostart(next: boolean) {
+    try {
+      await invoke("set_autostart", { enabled: next });
+      setAutostart(next);
+    } catch (error) {
+      showError(error);
+    }
+  }
 
   useEffect(() => {
     const category = normalizeCategoryPath(activeCategory);
@@ -1398,18 +1739,30 @@ function App() {
   }
 
   async function pushGiteeSync() {
-    const result = await invoke<{ gist_id: string; snippet_count: number }>("push_gitee_sync");
-    setGiteeGistId(result.gist_id);
-    setGiteeMessage(`${text.giteePushed}: ${result.snippet_count} ${text.snippets}`);
-    await refreshGiteeStatus();
+    setGiteeMessage("");
+    setGiteeSyncing("push");
+    try {
+      const result = await invoke<{ gist_id: string } & SyncCounts>("push_gitee_sync");
+      setGiteeGistId(result.gist_id);
+      setGiteeMessage(`${text.giteePushed}: ${syncBreakdown(result, text)}`);
+    } finally {
+      setGiteeSyncing(null);
+      void refreshGiteeStatus().catch(() => {});
+    }
   }
 
   async function pullGiteeSync() {
-    const result = await invoke<GiteePullResult>("pull_gitee_sync");
-    const { inserted, updated, skipped } = result.imported;
-    setGiteeMessage(`${text.giteePulled}: +${inserted}, ~${updated}, =${skipped}`);
-    await refresh();
-    await refreshGiteeStatus();
+    setGiteeMessage("");
+    setGiteeSyncing("pull");
+    try {
+      const result = await invoke<GiteePullResult>("pull_gitee_sync");
+      const { inserted, updated, skipped } = result.imported;
+      setGiteeMessage(`${text.giteePulled}: +${inserted}, ~${updated}, =${skipped}`);
+      await refresh();
+    } finally {
+      setGiteeSyncing(null);
+      void refreshGiteeStatus().catch(() => {});
+    }
   }
 
   async function refreshTerminalStatus() {
@@ -1477,6 +1830,30 @@ function App() {
           startWindowDrag={startWindowDrag}
           dbPath={dbPath}
         />
+      ) : workspace === "journal" && journalMode === "project" ? (
+        <ProjectWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" && journalMode === "inbox" ? (
+        <InboxWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
       ) : workspace === "journal" ? (
         <TrackWorkspace
           text={text}
@@ -1497,7 +1874,7 @@ function App() {
             <TerminalSquare size={20} />
           </div>
           <div data-tauri-drag-region>
-            <h1>AbraTab</h1>
+            <h1>{text.appName}</h1>
             <p>{liveSnippets.length} {text.snippets}</p>
           </div>
         </div>
@@ -1634,7 +2011,15 @@ function App() {
         </div>
       </section>
 
-      <section className="editor-panel">
+      <section
+        className="editor-panel"
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+            event.preventDefault();
+            void save().catch(showError);
+          }
+        }}
+      >
         <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
           <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
             <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
@@ -1662,6 +2047,10 @@ function App() {
                 <RotateCcw size={16} />
               </button>
             ) : null}
+            <button className="snippet-save" title={text.save} onClick={() => void save().catch(showError)}>
+              <Check size={14} />
+              <span>{text.save}</span>
+            </button>
           </div>
         </header>
 
@@ -1932,22 +2321,68 @@ function App() {
 
               {settingsTab === "window" ? (
                 <div className="settings-section">
+                  <SettingRow title={text.windowSize} detail={text.windowSizeDetail}>
+                    <div className="window-size-control">
+                      <input
+                        type="number"
+                        className="window-size-input"
+                        value={windowWidth}
+                        min={940}
+                        onChange={(event) => setWindowWidth(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void applyWindowSize();
+                        }}
+                      />
+                      <span className="window-size-x">×</span>
+                      <input
+                        type="number"
+                        className="window-size-input"
+                        value={windowHeight}
+                        min={620}
+                        onChange={(event) => setWindowHeight(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void applyWindowSize();
+                        }}
+                      />
+                      <button className="settings-action" onClick={() => void applyWindowSize()}>
+                        {text.windowSizeApply}
+                      </button>
+                    </div>
+                  </SettingRow>
                   <SettingRow title={text.launchAtLogin} detail={text.launchAtLoginDetail}>
                     <label className="settings-switch">
-                      <input type="checkbox" />
+                      <input
+                        type="checkbox"
+                        checked={autostart}
+                        onChange={(event) => void toggleAutostart(event.target.checked)}
+                      />
                       <span />
                     </label>
                   </SettingRow>
                   <SettingRow title={text.alwaysOnTop} detail={text.alwaysOnTopDetail}>
                     <label className="settings-switch">
-                      <input type="checkbox" />
+                      <input
+                        type="checkbox"
+                        checked={alwaysOnTop}
+                        onChange={(event) => void toggleAlwaysOnTop(event.target.checked)}
+                      />
                       <span />
                     </label>
                   </SettingRow>
                   <SettingRow title={text.windowChrome} detail={text.windowChromeDetail}>
                     <div className="segmented">
-                      <button className="selected">{text.overlay}</button>
-                      <button>{text.native}</button>
+                      <button
+                        className={titleBarStyle === "overlay" ? "selected" : ""}
+                        onClick={() => void changeTitleBarStyle("overlay")}
+                      >
+                        {text.overlay}
+                      </button>
+                      <button
+                        className={titleBarStyle === "visible" ? "selected" : ""}
+                        onClick={() => void changeTitleBarStyle("visible")}
+                      >
+                        {text.native}
+                      </button>
                     </div>
                   </SettingRow>
                 </div>
@@ -2077,7 +2512,7 @@ function App() {
                   <div className="sync-actions">
                     <button
                       className="settings-action"
-                      disabled={!giteeToken.trim() && !giteeStatus?.configured}
+                      disabled={(!giteeToken.trim() && !giteeStatus?.configured) || giteeSyncing !== null}
                       onClick={() => void saveGiteeSyncConfig().catch(showError)}
                     >
                       <Check size={14} />
@@ -2085,21 +2520,42 @@ function App() {
                     </button>
                     <button
                       className="settings-action"
-                      disabled={!giteeStatus?.configured}
+                      disabled={!giteeStatus?.configured || giteeSyncing !== null}
                       onClick={() => void pushGiteeSync().catch(showError)}
                     >
                       <Upload size={14} />
-                      <span>{text.giteePush}</span>
+                      <span>{giteeSyncing === "push" ? text.giteePushing : text.giteePush}</span>
                     </button>
                     <button
                       className="settings-action muted"
-                      disabled={!giteeStatus?.configured || !giteeGistId.trim()}
+                      disabled={!giteeStatus?.configured || !giteeGistId.trim() || giteeSyncing !== null}
                       onClick={() => void pullGiteeSync().catch(showError)}
                     >
                       <Download size={14} />
-                      <span>{text.giteePull}</span>
+                      <span>{giteeSyncing === "pull" ? text.giteePulling : text.giteePull}</span>
                     </button>
                   </div>
+
+                  {giteeSyncing ? (
+                    <div className="sync-progress" role="progressbar" aria-busy="true">
+                      <div className="sync-progress-bar" />
+                    </div>
+                  ) : null}
+
+                  {giteeStatus?.last_sync ? (
+                    <div className={`sync-log ${giteeStatus.last_sync.ok ? "ok" : "fail"}`}>
+                      {giteeStatus.last_sync.ok ? <Check size={12} /> : <X size={12} />}
+                      <span>
+                        {giteeStatus.last_sync.action === "pull" ? text.giteePull : text.giteePush}
+                        {" · "}
+                        {formatSyncTime(giteeStatus.last_sync.at, locale)}
+                        {" · "}
+                        {giteeStatus.last_sync.ok
+                          ? `${text.giteeSyncOk} · ${syncBreakdown(giteeStatus.last_sync, text)}`
+                          : `${text.giteeSyncFail}: ${giteeStatus.last_sync.message}`}
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="sync-status">
                     <span className={`terminal-badge ${giteeStatus?.configured ? "ok" : ""}`}>
@@ -2318,8 +2774,10 @@ function JournalModeNav({
   text: Strings;
 }) {
   const items: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
+    { id: "inbox", label: text.wsInbox, Icon: Inbox },
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
     { id: "track", label: text.wsTrack, Icon: Activity },
+    { id: "project", label: text.wsProject, Icon: FolderGit2 },
   ];
   return (
     <>
@@ -2480,6 +2938,19 @@ function WeekLogWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cmd/Ctrl+P toggles preview/edit while a weeklog is open.
+  useEffect(() => {
+    if (!form) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setShowPreview((value) => !value);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [form != null]);
+
   async function save() {
     if (!form) return;
     if (!form.title.trim() && !form.body.trim()) {
@@ -2537,7 +3008,7 @@ function WeekLogWorkspace({
             <CalendarDays size={20} />
           </div>
           <div data-tauri-drag-region>
-            <h1>AbraTab</h1>
+            <h1>{text.appName}</h1>
             <p>{logs.length} {text.wsWeeklogUnit}</p>
           </div>
         </div>
@@ -2642,7 +3113,7 @@ function WeekLogWorkspace({
             {form ? (
               <button
                 className={`icon-button ${showPreview ? "active" : ""}`}
-                title={showPreview ? text.weeklogEdit : text.preview}
+                title={`${showPreview ? text.weeklogEdit : text.preview} (⌘/Ctrl+P)`}
                 onClick={() => setShowPreview((value) => !value)}
               >
                 {showPreview ? <Pencil size={16} /> : <Eye size={16} />}
@@ -2718,6 +3189,599 @@ function WeekLogWorkspace({
           <span>
             <CalendarDays size={13} />
             {selected ? dateLabel(selected.created_at) : text.wsWeeklog}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+    </>
+  );
+}
+
+function InboxWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [items, setItems] = useState<InboxItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+  const [conn, setConn] = useState<InboxConnectionInfo | null>(null);
+
+  const intl = localeTags[locale];
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  function dateTimeLabel(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat(intl, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date);
+  }
+
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+  const unreadCount = items.filter((item) => !item.read).length;
+
+  async function refresh(nextQuery = query) {
+    const rows = await invoke<InboxItem[]>("list_inbox_items", { query: nextQuery.trim() || null });
+    setItems(rows);
+    return rows;
+  }
+
+  async function selectItem(item: InboxItem) {
+    setSelectedId(item.id);
+    if (!item.read) {
+      try {
+        await invoke("set_inbox_read", { id: item.id, read: true });
+        setItems((current) => current.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
+      } catch (error) {
+        showError(error);
+      }
+    }
+  }
+
+  async function toggleRead(item: InboxItem) {
+    try {
+      await invoke("set_inbox_read", { id: item.id, read: !item.read });
+      setItems((current) => current.map((row) => (row.id === item.id ? { ...row, read: !item.read } : row)));
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove(item: InboxItem) {
+    try {
+      await invoke("delete_inbox_item", { id: item.id });
+      const rows = await refresh();
+      setStatus(text.inboxDeleted);
+      if (item.id === selectedId) setSelectedId(rows[0]?.id ?? null);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function copy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus(text.inboxCopied);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  useEffect(() => {
+    void refresh("").catch(showError);
+    invoke<InboxConnectionInfo>("inbox_connection_info").then(setConn).catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll so records pushed by Claude/Codex show up without a manual refresh.
+  useEffect(() => {
+    const timer = setInterval(() => void refresh(query).catch(() => {}), 5000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  const cliPath = conn?.cli_path ?? "abratab-cli";
+  const cliSnippet = `${cliPath} inbox "今天完成了 X"`;
+  const mcpClaudeSnippet = `{
+  "mcpServers": {
+    "abratab": {
+      "command": "${cliPath}",
+      "args": ["mcp"]
+    }
+  }
+}`;
+  const mcpCodexSnippet = `[mcp_servers.abratab]
+command = "${cliPath}"
+args = ["mcp"]`;
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <Inbox size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{items.length} {text.inboxUnit}{unreadCount > 0 ? ` · ${unreadCount} ${text.inboxUnread}` : ""}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <div className="nav-foot">
+          <button title={text.inboxRefresh} onClick={() => void refresh().catch(showError)}>
+            <RotateCcw size={15} />
+          </button>
+          <span>{text.wsInbox}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refresh(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchInbox}
+            />
+          </label>
+          <button className="add-button" onClick={() => void refresh().catch(showError)} title={text.inboxRefresh}>
+            <RotateCcw size={16} />
+          </button>
+        </div>
+
+        <div className="snippet-list">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              className={`snippet-item ${item.id === selectedId ? "selected" : ""}`}
+              onClick={() => void selectItem(item)}
+            >
+              <div className="snippet-title-row">
+                <span className="snippet-title">
+                  {!item.read ? <span className="inbox-dot" /> : null}
+                  {item.title.trim() || item.body.trim().split("\n")[0] || text.inboxUntitled}
+                </span>
+              </div>
+              <div className="snippet-meta">
+                <span className="inbox-source">{item.source}</span>
+                <span className="folder-meta">{dateTimeLabel(item.created_at)}</span>
+              </div>
+            </button>
+          ))}
+          {items.length === 0 ? <div className="empty-list">{text.noInbox}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <Inbox size={11} />
+              {selected ? selected.source : text.wsInbox}
+            </div>
+            <input value={selected?.title ?? ""} placeholder={text.wsInbox} disabled readOnly />
+          </div>
+          <div className="editor-tools">
+            {selected ? (
+              <>
+                <button
+                  className="icon-button"
+                  title={selected.read ? text.inboxMarkUnread : text.inboxMarkRead}
+                  onClick={() => void toggleRead(selected)}
+                >
+                  <Check size={16} />
+                </button>
+                <button className="icon-button" title={text.inboxCopy} onClick={() => void copy(selected.body)}>
+                  <Copy size={16} />
+                </button>
+                <button className="icon-button" title={text.delete} onClick={() => void remove(selected)}>
+                  <Trash2 size={16} />
+                </button>
+              </>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {selected ? (
+            <div className="inbox-detail">
+              <div className="inbox-detail-meta">
+                <span className="inbox-source">{selected.source}</span>
+                <span>{dateTimeLabel(selected.created_at)}</span>
+              </div>
+              {selected.title.trim() ? <h3 className="inbox-detail-title">{selected.title}</h3> : null}
+              <div className="inbox-detail-body">{selected.body}</div>
+            </div>
+          ) : (
+            <div className="inbox-connect">
+              <p className="inbox-connect-lead">{text.inboxPickHint}</p>
+
+              <div className="inbox-connect-block">
+                <div className="inbox-connect-head">
+                  <span>{text.inboxConnectCliLabel}</span>
+                  <button className="settings-action" onClick={() => void copy(cliSnippet)}>
+                    <Copy size={13} />
+                    {text.inboxCopy}
+                  </button>
+                </div>
+                <pre className="inbox-code">{cliSnippet}</pre>
+              </div>
+
+              <div className="inbox-connect-block">
+                <div className="inbox-connect-head">
+                  <span>{text.inboxConnectMcpClaude}</span>
+                  <button className="settings-action" onClick={() => void copy(mcpClaudeSnippet)}>
+                    <Copy size={13} />
+                    {text.inboxCopy}
+                  </button>
+                </div>
+                <pre className="inbox-code">{mcpClaudeSnippet}</pre>
+              </div>
+
+              <div className="inbox-connect-block">
+                <div className="inbox-connect-head">
+                  <span>{text.inboxConnectMcpCodex}</span>
+                  <button className="settings-action" onClick={() => void copy(mcpCodexSnippet)}>
+                    <Copy size={13} />
+                    {text.inboxCopy}
+                  </button>
+                </div>
+                <pre className="inbox-code">{mcpCodexSnippet}</pre>
+              </div>
+
+              <p className="inbox-connect-note">{text.inboxConnectNote}</p>
+            </div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <Inbox size={13} />
+            {items.length} {text.inboxUnit}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+    </>
+  );
+}
+
+function ProjectWorkspace({
+  text,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [form, setForm] = useState<ProjectForm | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  const selected = projects.find((project) => project.id === selectedId) ?? null;
+
+  async function refresh(nextQuery = query) {
+    const rows = await invoke<Project[]>("list_projects", { query: nextQuery.trim() || null });
+    setProjects(rows);
+    return rows;
+  }
+
+  function loadIntoForm(project: Project) {
+    setSelectedId(project.id);
+    setForm({
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      git_url: project.git_url,
+      description: project.description,
+    });
+  }
+
+  function newProject() {
+    setSelectedId(null);
+    setForm({ name: "", path: "", git_url: "", description: "" });
+  }
+
+  async function save() {
+    if (!form) return;
+    if (!form.name.trim() && !form.path.trim() && !form.git_url.trim()) {
+      setStatus(text.projectEmpty);
+      return;
+    }
+    try {
+      const saved = await invoke<Project>("save_project", {
+        input: {
+          id: form.id,
+          name: form.name.trim() || text.projectUntitled,
+          path: form.path.trim(),
+          git_url: form.git_url.trim(),
+          description: form.description,
+        },
+      });
+      await refresh();
+      loadIntoForm(saved);
+      setStatus(text.projectSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove() {
+    if (!form?.id) return;
+    try {
+      await invoke("delete_project", { id: form.id });
+      const rows = await refresh();
+      setStatus(text.projectDeleted);
+      if (rows.length) loadIntoForm(rows[0]);
+      else {
+        setSelectedId(null);
+        setForm(null);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function openFolder() {
+    const path = form?.path.trim();
+    if (!path) return;
+    try {
+      await invoke("open_path", { path });
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await refresh("");
+      if (rows.length) loadIntoForm(rows[0]);
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <FolderGit2 size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{projects.length} {text.projectUnit}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <div className="nav-foot">
+          <button title={text.newProject} onClick={() => newProject()}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsProject}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refresh(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchProjects}
+            />
+          </label>
+          <button className="add-button" onClick={() => newProject()} title={text.newProject}>
+            <Plus size={17} />
+          </button>
+        </div>
+
+        <div className="snippet-list">
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              className={`snippet-item ${project.id === selectedId ? "selected" : ""}`}
+              onClick={() => loadIntoForm(project)}
+            >
+              <div className="snippet-title-row">
+                <span className="snippet-title">{project.name.trim() || text.projectUntitled}</span>
+              </div>
+              <div className="snippet-meta">
+                <span className="folder-meta">
+                  <Folder size={11} />
+                  {project.path.trim() || text.projectNoPath}
+                </span>
+              </div>
+            </button>
+          ))}
+          {projects.length === 0 ? <div className="empty-list">{text.noProjects}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <FolderGit2 size={11} />
+              {text.wsProject}
+            </div>
+            <input
+              value={form?.name ?? ""}
+              onChange={(event) => form && setForm({ ...form, name: event.target.value })}
+              placeholder={text.projectNamePlaceholder}
+              disabled={!form}
+            />
+          </div>
+          <div className="editor-tools">
+            {form?.path.trim() ? (
+              <button
+                className="icon-button"
+                title={text.projectOpenFolder}
+                onClick={() => void openFolder()}
+              >
+                <FolderOpen size={16} />
+              </button>
+            ) : null}
+            {form?.id ? (
+              <button className="icon-button" title={text.delete} onClick={() => void remove()}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {form ? (
+            <div
+              className="project-form"
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+                  event.preventDefault();
+                  void save();
+                }
+              }}
+            >
+              <div className="project-field">
+                <span className="project-field-label">
+                  <Folder size={13} />
+                  {text.projectPath}
+                </span>
+                <div className="project-field-row">
+                  <input
+                    value={form.path}
+                    onChange={(event) => setForm({ ...form, path: event.target.value })}
+                    placeholder={text.projectPathPlaceholder}
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    className="project-field-action"
+                    title={text.projectOpenFolder}
+                    disabled={!form.path.trim()}
+                    onClick={() => void openFolder()}
+                  >
+                    <FolderOpen size={15} />
+                  </button>
+                </div>
+              </div>
+              <label className="project-field">
+                <span className="project-field-label">
+                  <GitBranch size={13} />
+                  {text.projectGitUrl}
+                </span>
+                <input
+                  value={form.git_url}
+                  onChange={(event) => setForm({ ...form, git_url: event.target.value })}
+                  placeholder={text.projectGitPlaceholder}
+                  spellCheck={false}
+                />
+              </label>
+              <label className="project-field">
+                <span className="project-field-label">
+                  <Info size={13} />
+                  {text.projectDesc}
+                </span>
+                <textarea
+                  className="project-textarea"
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  placeholder={text.projectDescPlaceholder}
+                  spellCheck={false}
+                />
+              </label>
+
+              <div className="weeklog-actions">
+                <button type="button" className="weeklog-save" onClick={() => void save()}>
+                  <Check size={14} />
+                  {text.save}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="weeklog-empty-editor">{text.projectPickHint}</div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <FolderGit2 size={13} />
+            {selected ? selected.name.trim() || text.projectUntitled : text.wsProject}
           </span>
           <span className="db">
             <Database size={13} />
@@ -2906,7 +3970,7 @@ function TrackWorkspace({
             <Activity size={20} />
           </div>
           <div data-tauri-drag-region>
-            <h1>AbraTab</h1>
+            <h1>{text.appName}</h1>
             <p>{tracks.length} {text.trackUnit}</p>
           </div>
         </div>

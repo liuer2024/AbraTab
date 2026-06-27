@@ -5,7 +5,7 @@ trigger, press Tab, and expand reusable text anywhere you can type. It supports
 variable placeholders, categories, tags, shell-specific snippets, and terminal
 search.
 
-AbraTab：本地优先的文本扩展与代码片段管理工具。输入触发词，按下 Tab，在任何能打字的地方瞬间展开，支持变量填充、分类与标签管理。
+妙手（AbraTab）：本地优先的文本扩展与代码片段管理工具。输入触发词，按下 Tab，在任何能打字的地方瞬间展开，支持变量填充、分类与标签管理。"妙手"取信手拈来、按 Tab 即变之意。
 
 ## Features
 
