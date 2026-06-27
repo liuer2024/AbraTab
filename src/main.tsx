@@ -335,6 +335,16 @@ function safeUrl(url: string): string | null {
 
 // Minimal, dependency-free Markdown → safe HTML for the weeklog preview.
 // Input is HTML-escaped first, so every replacement below operates on inert text.
+// Build an <img> tag, honoring an optional `=WIDTHxHEIGHT` size hint.
+function imageTag(src: string, alt: string, width?: string, height?: string): string {
+  const styles: string[] = [];
+  if (width) styles.push(`width:${width}px`);
+  if (height) styles.push(`height:${height}px`);
+  const cls = styles.length ? ' class="md-img-sized"' : "";
+  const style = styles.length ? ` style="${styles.join(";")}"` : "";
+  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${cls}${style} />`;
+}
+
 function renderMarkdown(source: string): string {
   const blocks = source.replace(/\r\n/g, "\n").split(/\n{2,}/);
   const html = blocks.map((block) => {
@@ -342,11 +352,12 @@ function renderMarkdown(source: string): string {
     if (!trimmed) return "";
 
     // Standalone image: render large, not inside a paragraph.
-    const loneImage = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    // Optional size hint: ![alt](url =宽x) or ![alt](url =宽x高).
+    const loneImage = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)(?:\s+=(\d*)x(\d*))?\)$/);
     if (loneImage) {
       const src = safeUrl(loneImage[2]);
       if (src) {
-        return `<p class="md-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(loneImage[1])}" /></p>`;
+        return `<p class="md-image">${imageTag(src, loneImage[1], loneImage[3], loneImage[4])}</p>`;
       }
     }
 
@@ -371,10 +382,10 @@ function renderMarkdown(source: string): string {
 
 function inlineMarkdown(text: string): string {
   let out = escapeHtml(text);
-  // Images: ![alt](url)
-  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt, url) => {
+  // Images: ![alt](url) with optional `=宽x高` size hint.
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+=(\d*)x(\d*))?\)/g, (match, alt, url, w, h) => {
     const src = safeUrl(url);
-    return src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" />` : match;
+    return src ? imageTag(src, alt, w, h) : match;
   });
   // Links: [text](url)
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
@@ -3824,11 +3835,62 @@ function TrackWorkspace({
   const [status, setStatus] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const composeRef = useRef<HTMLTextAreaElement | null>(null);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
 
   const intl = localeTags[locale];
 
   function showError(error: unknown) {
     setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  // Insert text at the textarea caret, keeping the caret after the inserted text.
+  function insertAtCaret(
+    ref: React.RefObject<HTMLTextAreaElement | null>,
+    setValue: React.Dispatch<React.SetStateAction<string>>,
+    snippet: string,
+  ) {
+    const el = ref.current;
+    setValue((value) => {
+      const start = el ? el.selectionStart : value.length;
+      const end = el ? el.selectionEnd : value.length;
+      if (el) {
+        const caret = start + snippet.length;
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(caret, caret);
+        });
+      }
+      return value.slice(0, start) + snippet + value.slice(end);
+    });
+  }
+
+  // Paste an image → upload to the configured image host → insert a Markdown link.
+  async function handleImagePaste(
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+    insert: (snippet: string) => void,
+  ) {
+    const file = clipboardImage(event);
+    if (!file) return;
+    event.preventDefault();
+    setUploading(true);
+    setStatus(text.weeklogImageUploading);
+    try {
+      const data = await fileToBase64(file);
+      const result = await invoke<UploadResult>("upload_image", {
+        filename: imageFilename(file),
+        data,
+      });
+      insert(`![](${result.url})\n`);
+      setStatus(text.weeklogImageUploaded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(/not configured/i.test(message) ? text.weeklogImageNotConfigured : message);
+    } finally {
+      setUploading(false);
+    }
   }
 
   function formatDate(value: string | null) {
@@ -4050,9 +4112,20 @@ function TrackWorkspace({
           </div>
           <div className="editor-tools">
             {selectedId ? (
-              <button className="icon-button" title={text.delete} onClick={() => void deleteTrack()}>
-                <Trash2 size={16} />
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="snippet-save"
+                  onClick={() => void addEntry()}
+                  disabled={!newEntry.trim()}
+                >
+                  <Plus size={14} />
+                  {text.addEntry}
+                </button>
+                <button className="icon-button" title={text.delete} onClick={() => void deleteTrack()}>
+                  <Trash2 size={16} />
+                </button>
+              </>
             ) : null}
           </div>
         </header>
@@ -4062,6 +4135,7 @@ function TrackWorkspace({
             <>
               <div className="entry-compose">
                 <textarea
+                  ref={composeRef}
                   value={newEntry}
                   onChange={(event) => setNewEntry(event.target.value)}
                   onKeyDown={(event) => {
@@ -4070,27 +4144,42 @@ function TrackWorkspace({
                       void addEntry();
                     }
                   }}
+                  onPaste={(event) =>
+                    void handleImagePaste(event, (snippet) =>
+                      insertAtCaret(composeRef, setNewEntry, snippet),
+                    )
+                  }
                   placeholder={text.newEntryPlaceholder}
                   spellCheck={false}
                 />
-                <button
-                  type="button"
-                  className="weeklog-save"
-                  onClick={() => void addEntry()}
-                  disabled={!newEntry.trim()}
-                >
-                  <Plus size={14} />
-                  {text.addEntry}
-                </button>
+                <div className="entry-compose-hint">
+                  {uploading ? (
+                    text.weeklogImageUploading
+                  ) : (
+                    <>
+                      <ImagePlus size={12} />
+                      {text.weeklogImageHint}
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="timeline">
+              <div
+                className="timeline"
+                onClick={(event) => {
+                  const target = event.target as HTMLElement;
+                  if (target instanceof HTMLImageElement) setLightbox(target.src);
+                }}
+              >
                 {entries.map((entry) => (
                   <div className="timeline-item" key={entry.id}>
                     <span className="timeline-dot" />
                     <div className="timeline-row">
                       <div className="timeline-content">
-                        <div className="timeline-body">{entry.body}</div>
+                        <div
+                          className="timeline-body markdown-body"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.body) }}
+                        />
                         <div className="timeline-time">{formatDateTime(entry.created_at)}</div>
                       </div>
                       <div className="timeline-actions">
@@ -4151,6 +4240,7 @@ function TrackWorkspace({
             <h3>{text.editEntry}</h3>
             <textarea
               autoFocus
+              ref={editRef}
               className="entry-edit-textarea"
               value={editDraft}
               onChange={(event) => setEditDraft(event.target.value)}
@@ -4163,8 +4253,23 @@ function TrackWorkspace({
                   void saveEntryEdit();
                 }
               }}
+              onPaste={(event) =>
+                void handleImagePaste(event, (snippet) =>
+                  insertAtCaret(editRef, setEditDraft, snippet),
+                )
+              }
               spellCheck={false}
             />
+            <div className="entry-compose-hint">
+              {uploading ? (
+                text.weeklogImageUploading
+              ) : (
+                <>
+                  <ImagePlus size={12} />
+                  {text.weeklogImageHint}
+                </>
+              )}
+            </div>
             <div className="prompt-actions">
               <button type="button" className="prompt-cancel" onClick={() => setEditingId(null)}>
                 {text.cancel}
@@ -4174,6 +4279,12 @@ function TrackWorkspace({
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {lightbox ? (
+        <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="" />
         </div>
       ) : null}
     </>
