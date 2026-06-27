@@ -3775,7 +3775,7 @@ function InboxWorkspace({
     setComposeId(null);
     setComposeTitle("");
     setComposeBody("");
-    setComposeFormat("markdown");
+    setComposeFormat("text");
     setSelectedId(null);
     setComposeOpen(true);
   }
