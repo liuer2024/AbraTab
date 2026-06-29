@@ -681,6 +681,128 @@ label,
   background: var(--hover);
 }
 
+/* Weeklog "new note" split button: main create + caret to pick a template. */
+.weeklog-new {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.weeklog-new .add-caret {
+  width: 18px;
+}
+
+.weeklog-new-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 120;
+  min-width: 132px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.weeklog-new-menu button {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.weeklog-new-menu button:hover {
+  background: var(--hover);
+}
+
+/* Per-day pager in the weeklog editor toolbar: ‹ 6月29日 周一 › */
+.weeklog-daynav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.weeklog-dayarrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+}
+
+.weeklog-dayarrow:hover {
+  background: var(--hover);
+}
+
+.weeklog-dayarrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Blocks mode: this week's 7 days stacked, each its own labelled input. */
+.weeklog-blocks {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.weeklog-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.weeklog-block-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 7px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.weeklog-block-input {
+  border: 0;
+  outline: 0;
+  resize: vertical;
+  min-height: 150px;
+  padding: 4px 14px;
+  color: var(--code-ink);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.weeklog-block-input:focus {
+  background: var(--hover);
+}
+
 .weeklog-star {
   flex: 0 0 auto;
   margin-left: 6px;

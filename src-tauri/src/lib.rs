@@ -182,8 +182,17 @@ struct InboxConnectionInfo {
 }
 
 #[tauri::command]
-fn list_inbox_items(query: Option<String>) -> Result<Vec<InboxItem>, AppError> {
-    Ok(Store::open_default()?.list_inbox_items(query.as_deref())?)
+fn list_inbox_items(
+    query: Option<String>,
+    archived: Option<bool>,
+) -> Result<Vec<InboxItem>, AppError> {
+    Ok(Store::open_default()?.list_inbox_items(query.as_deref(), Some(archived.unwrap_or(false)))?)
+}
+
+#[tauri::command]
+fn set_inbox_archived(id: String, archived: bool) -> Result<(), AppError> {
+    Store::open_default()?.set_inbox_archived(&id, archived)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -832,6 +841,7 @@ pub fn run() {
             create_inbox_item,
             update_inbox_item,
             set_inbox_read,
+            set_inbox_archived,
             delete_inbox_item,
             inbox_connection_info,
             journal_activity,

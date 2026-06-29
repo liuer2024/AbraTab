@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   CalendarRange,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -224,6 +225,7 @@ type InboxItem = {
   format: string;
   read: boolean;
   created_at: string;
+  archived_at: string | null;
 };
 
 type InboxConnectionInfo = {
@@ -328,6 +330,33 @@ function readTitleBarStyle(): TitleBarPref {
 function writeTitleBarStyle(value: TitleBarPref) {
   try {
     localStorage.setItem(TITLE_BAR_STYLE_KEY, value);
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
+const WEEKLOG_TEMPLATE_KEY = "abratab.weeklogTemplate";
+
+// New-note mode + how a week-framed note is shown:
+//   "blank"  → empty note, edited as one whole body;
+//   "paged"  → this week's 7 days, shown one day at a time (‹ › pager);
+//   "blocks" → this week's 7 days, shown as stacked per-day blocks.
+type WeeklogTemplate = "blank" | "paged" | "blocks";
+
+function readWeeklogTemplate(): WeeklogTemplate {
+  try {
+    const value = localStorage.getItem(WEEKLOG_TEMPLATE_KEY);
+    if (value === "blocks") return "blocks";
+    if (value === "paged" || value === "week") return "paged"; // "week": legacy paged
+    return "blank";
+  } catch {
+    return "blank";
+  }
+}
+
+function writeWeeklogTemplate(value: WeeklogTemplate) {
+  try {
+    localStorage.setItem(WEEKLOG_TEMPLATE_KEY, value);
   } catch {
     /* localStorage unavailable; ignore */
   }
@@ -657,10 +686,17 @@ const translations = {
     allWeeklogs: "全部周记",
     thisWeek: "本周",
     newWeeklog: "新建周记",
+    weeklogTemplate: "新建周记默认模板",
+    weeklogTemplateDetail: "新建周记时预填的内容",
+    weeklogTemplateBlank: "空白",
+    weeklogTemplatePaged: "翻页",
+    weeklogTemplateBlocks: "多块",
+    weeklogNewOptions: "选择新建模板",
     searchWeeklogs: "搜索周记...",
     noWeeklogs: "还没有周记",
     weeklogTitlePlaceholder: "标题（可选）",
     weeklogBodyPlaceholder: "记录这一周做了什么、遇到了什么、下周打算做什么…",
+    weeklogDayPlaceholder: "记录这一天做了什么、遇到了什么…",
     weeklogPickHint: "从左侧选择一篇，或点「新增」开始记录。",
     lockSet: "加锁",
     lockRemove: "解锁",
@@ -771,6 +807,11 @@ const translations = {
     inboxRefresh: "刷新",
     searchInbox: "搜索收件箱…",
     noInbox: "收件箱还是空的。让 Claude / Codex 推一条进来试试。",
+    noArchivedInbox: "没有已归档的内容。",
+    inboxArchive: "归档",
+    inboxUnarchive: "取消归档",
+    inboxArchived: "已归档",
+    inboxUnarchived: "已取消归档",
     inboxUntitled: "无标题",
     inboxPickHint: "从左侧选择一条记录查看，或按下面任意一种方式从 Claude / Codex 写入。",
     inboxConnectCliLabel: "命令行（最简单，让 AI 顺手敲一句）",
@@ -951,10 +992,17 @@ const translations = {
     allWeeklogs: "All logs",
     thisWeek: "This week",
     newWeeklog: "New note",
+    weeklogTemplate: "New note template",
+    weeklogTemplateDetail: "What a new note is prefilled with",
+    weeklogTemplateBlank: "Blank",
+    weeklogTemplatePaged: "Paged",
+    weeklogTemplateBlocks: "Blocks",
+    weeklogNewOptions: "Choose template",
     searchWeeklogs: "Search logs...",
     noWeeklogs: "No weekly logs yet",
     weeklogTitlePlaceholder: "Title (optional)",
     weeklogBodyPlaceholder: "What you did this week, what came up, what's next…",
+    weeklogDayPlaceholder: "What you did and ran into today…",
     weeklogPickHint: "Pick a note on the left, or hit New to start.",
     lockSet: "Lock",
     lockRemove: "Unlock",
@@ -1065,6 +1113,11 @@ const translations = {
     inboxRefresh: "Refresh",
     searchInbox: "Search inbox…",
     noInbox: "Inbox is empty. Try pushing one from Claude / Codex.",
+    noArchivedInbox: "No archived items.",
+    inboxArchive: "Archive",
+    inboxUnarchive: "Unarchive",
+    inboxArchived: "Archived",
+    inboxUnarchived: "Unarchived",
     inboxUntitled: "Untitled",
     inboxPickHint: "Select a record to view, or push from Claude / Codex using any method below.",
     inboxConnectCliLabel: "CLI (simplest — have the agent run a command)",
@@ -1245,10 +1298,17 @@ const translations = {
     allWeeklogs: "すべて",
     thisWeek: "今週",
     newWeeklog: "新規",
+    weeklogTemplate: "新規ノートの初期内容",
+    weeklogTemplateDetail: "新規作成時に挿入する雛形",
+    weeklogTemplateBlank: "空白",
+    weeklogTemplatePaged: "ページ",
+    weeklogTemplateBlocks: "ブロック",
+    weeklogNewOptions: "雛形を選択",
     searchWeeklogs: "週次ログを検索...",
     noWeeklogs: "週次ログがありません",
     weeklogTitlePlaceholder: "タイトル（任意）",
     weeklogBodyPlaceholder: "今週やったこと、起きたこと、来週の予定…",
+    weeklogDayPlaceholder: "今日やったこと、気づいたことを記録…",
     weeklogPickHint: "左からノートを選ぶか、「新規」で書き始めます。",
     lockSet: "ロック",
     lockRemove: "ロック解除",
@@ -1359,6 +1419,11 @@ const translations = {
     inboxRefresh: "更新",
     searchInbox: "受信箱を検索…",
     noInbox: "受信箱は空です。Claude / Codex から送ってみましょう。",
+    noArchivedInbox: "アーカイブされた項目はありません。",
+    inboxArchive: "アーカイブ",
+    inboxUnarchive: "アーカイブ解除",
+    inboxArchived: "アーカイブしました",
+    inboxUnarchived: "アーカイブを解除しました",
     inboxUntitled: "無題",
     inboxPickHint: "左から記録を選ぶか、下のいずれかの方法で Claude / Codex から送信してください。",
     inboxConnectCliLabel: "CLI（最も簡単 — エージェントにコマンドを実行させる）",
@@ -1387,6 +1452,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [activeView, setActiveView] = useState<LibraryView>("all");
   const [defaultWorkspace, setDefaultWorkspace] = useState<Workspace>(readDefaultWorkspace);
+  const [weeklogTemplate, setWeeklogTemplate] = useState<WeeklogTemplate>(readWeeklogTemplate);
   const [workspace, setWorkspace] = useState<Workspace>(readDefaultWorkspace);
   const [journalMode, setJournalMode] = useState<JournalMode>("weeklog");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -2046,6 +2112,7 @@ function App() {
           onOpenSettings={() => setSettingsOpen(true)}
           startWindowDrag={startWindowDrag}
           dbPath={dbPath}
+          weeklogTemplate={weeklogTemplate}
         />
       ) : workspace === "journal" && journalMode === "project" ? (
         <ProjectWorkspace
@@ -2508,6 +2575,37 @@ function App() {
                         }}
                       >
                         {text.wsJournal}
+                      </button>
+                    </div>
+                  </SettingRow>
+                  <SettingRow title={text.weeklogTemplate} detail={text.weeklogTemplateDetail}>
+                    <div className="segmented">
+                      <button
+                        className={weeklogTemplate === "blank" ? "selected" : ""}
+                        onClick={() => {
+                          setWeeklogTemplate("blank");
+                          writeWeeklogTemplate("blank");
+                        }}
+                      >
+                        {text.weeklogTemplateBlank}
+                      </button>
+                      <button
+                        className={weeklogTemplate === "paged" ? "selected" : ""}
+                        onClick={() => {
+                          setWeeklogTemplate("paged");
+                          writeWeeklogTemplate("paged");
+                        }}
+                      >
+                        {text.weeklogTemplatePaged}
+                      </button>
+                      <button
+                        className={weeklogTemplate === "blocks" ? "selected" : ""}
+                        onClick={() => {
+                          setWeeklogTemplate("blocks");
+                          writeWeeklogTemplate("blocks");
+                        }}
+                      >
+                        {text.weeklogTemplateBlocks}
                       </button>
                     </div>
                   </SettingRow>
@@ -3165,6 +3263,7 @@ function WeekLogWorkspace({
   onOpenSettings,
   startWindowDrag,
   dbPath,
+  weeklogTemplate,
 }: {
   text: Strings;
   locale: Locale;
@@ -3175,6 +3274,7 @@ function WeekLogWorkspace({
   onOpenSettings: () => void;
   startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
   dbPath: string;
+  weeklogTemplate: WeeklogTemplate;
 }) {
   const [logs, setLogs] = useState<WeekLog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3186,6 +3286,8 @@ function WeekLogWorkspace({
   const [starredOnly, setStarredOnly] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; log: WeekLog } | null>(null);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [dayIndex, setDayIndex] = useState(0);
   const [lockedIds, setLockedIds] = useState<Set<string>>(() => new Set());
   const [unlocked, setUnlocked] = useState(false);
   const [pwdDialog, setPwdDialog] = useState<{
@@ -3203,24 +3305,104 @@ function WeekLogWorkspace({
     setStatus(error instanceof Error ? error.message : String(error));
   }
 
-  // Insert text at the textarea caret, keeping the caret after the inserted text.
+  // Day-paging derivations. A note splits into per-day pages only when it
+  // actually contains day-label lines; otherwise it is edited as one whole body.
+  const editingLog = logs.find((log) => log.id === selectedId) ?? null;
+  const dayLabels = form ? weekLabels(editingLog?.created_at) : [];
+  const dayParsed = form
+    ? splitDays(form.body, dayLabels)
+    : { found: false, contents: [] as string[] };
+  const framed = !!form && dayParsed.found && !showPreview;
+  const paged = framed && weeklogTemplate === "paged";
+  const blocks = framed && weeklogTemplate === "blocks";
+  const dayContent = paged ? dayParsed.contents[dayIndex] ?? "" : form?.body ?? "";
+
+  // Insert text at the caret of the currently-edited text (a single day's
+  // content when paging, else the whole body), keeping the caret after it.
   function insertAtCursor(snippet: string) {
+    const el = textareaRef.current;
     setForm((current) => {
       if (!current) return current;
-      const el = textareaRef.current;
-      const body = current.body;
-      const start = el ? el.selectionStart : body.length;
-      const end = el ? el.selectionEnd : body.length;
-      const next = body.slice(0, start) + snippet + body.slice(end);
-      if (el) {
+      const moveCaret = (start: number) => {
+        if (!el) return;
         const caret = start + snippet.length;
         requestAnimationFrame(() => {
           el.focus();
           el.setSelectionRange(caret, caret);
         });
+      };
+      if (paged) {
+        const contents = splitDays(current.body, dayLabels).contents.slice();
+        const content = contents[dayIndex] ?? "";
+        const start = el ? el.selectionStart : content.length;
+        const end = el ? el.selectionEnd : content.length;
+        contents[dayIndex] = content.slice(0, start) + snippet + content.slice(end);
+        moveCaret(start);
+        return { ...current, body: joinDays(dayLabels, contents) };
       }
-      return { ...current, body: next };
+      const body = current.body;
+      const start = el ? el.selectionStart : body.length;
+      const end = el ? el.selectionEnd : body.length;
+      moveCaret(start);
+      return { ...current, body: body.slice(0, start) + snippet + body.slice(end) };
     });
+  }
+
+  // Write back edited text: one day's content when paging, else the whole body.
+  function setDayContent(next: string) {
+    setForm((current) => {
+      if (!current) return current;
+      if (!paged) return { ...current, body: next };
+      const contents = splitDays(current.body, dayLabels).contents.slice();
+      contents[dayIndex] = next;
+      return { ...current, body: joinDays(dayLabels, contents) };
+    });
+  }
+
+  // Blocks mode: write back a specific day's content by index.
+  function setDayContentAt(index: number, next: string) {
+    setForm((current) => {
+      if (!current) return current;
+      const contents = splitDays(current.body, dayLabels).contents.slice();
+      contents[index] = next;
+      return { ...current, body: joinDays(dayLabels, contents) };
+    });
+  }
+
+  // Blocks mode: paste an image into a specific day's block.
+  async function handleBlockPaste(
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+    index: number,
+  ) {
+    const file = clipboardImage(event);
+    if (!file) return;
+    event.preventDefault();
+    const el = event.currentTarget;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    setUploading(true);
+    setStatus(text.weeklogImageUploading);
+    try {
+      const data = await fileToBase64(file);
+      const result = await invoke<UploadResult>("upload_image", {
+        filename: imageFilename(file),
+        data,
+      });
+      const snippet = `![](${result.url})\n`;
+      setForm((current) => {
+        if (!current) return current;
+        const contents = splitDays(current.body, dayLabels).contents.slice();
+        const content = contents[index] ?? "";
+        contents[index] = content.slice(0, start) + snippet + content.slice(end);
+        return { ...current, body: joinDays(dayLabels, contents) };
+      });
+      setStatus(text.weeklogImageUploaded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(/not configured/i.test(message) ? text.weeklogImageNotConfigured : message);
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -3370,11 +3552,73 @@ function WeekLogWorkspace({
   function loadIntoForm(log: WeekLog) {
     setSelectedId(log.id);
     setForm({ id: log.id, title: log.title, body: log.body });
+    setDayIndex(todayDayIndex(log.created_at));
   }
 
-  function newNote() {
+  // The 7 Mon→Sun day labels (e.g. "6月29日 周一") for the week containing `ref`.
+  function weekLabels(refIso?: string): string[] {
+    const ref = (refIso && parseDate(refIso)) || new Date();
+    const monday = new Date(
+      ref.getFullYear(),
+      ref.getMonth(),
+      ref.getDate() - ((ref.getDay() + 6) % 7),
+    );
+    const dayFmt = new Intl.DateTimeFormat(intl, { month: "long", day: "numeric" });
+    const weekdayFmt = new Intl.DateTimeFormat(intl, { weekday: "short" });
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+      return `${dayFmt.format(d)} ${weekdayFmt.format(d)}`;
+    });
+  }
+
+  // This week's Mon→Sun frame: one day label per line, a blank line between days.
+  function buildWeekFrame(): string {
+    return weekLabels()
+      .map((label) => `${label}\n`)
+      .join("\n");
+  }
+
+  // Split a note body into each day's content by matching day-label lines.
+  // `found` is false for free-form / legacy notes (no label line) → no paging.
+  function splitDays(body: string, labels: string[]): { found: boolean; contents: string[] } {
+    const buffers: string[][] = labels.map(() => []);
+    let current = -1;
+    let found = false;
+    for (const line of body.split("\n")) {
+      const idx = labels.indexOf(line.trim());
+      if (idx >= 0) {
+        current = idx;
+        found = true;
+        continue;
+      }
+      if (current >= 0) buffers[current].push(line);
+    }
+    const contents = buffers.map((lines) => lines.join("\n").replace(/^\n+|\n+$/g, ""));
+    return { found, contents };
+  }
+
+  // Reassemble per-day contents back into a single body.
+  function joinDays(labels: string[], contents: string[]): string {
+    return labels
+      .map((label, i) => (contents[i]?.trim() ? `${label}\n${contents[i]}` : label))
+      .join("\n\n");
+  }
+
+  // Index of today within `ref`'s week, or 0 when today is outside that week.
+  function todayDayIndex(refIso?: string): number {
+    const labels = weekLabels(refIso);
+    const t = new Date();
+    const dayFmt = new Intl.DateTimeFormat(intl, { month: "long", day: "numeric" });
+    const weekdayFmt = new Intl.DateTimeFormat(intl, { weekday: "short" });
+    const idx = labels.indexOf(`${dayFmt.format(t)} ${weekdayFmt.format(t)}`);
+    return idx >= 0 ? idx : 0;
+  }
+
+  function newNote(template: WeeklogTemplate = weeklogTemplate) {
     setSelectedId(null);
-    setForm({ title: "", body: "" });
+    setNewMenuOpen(false);
+    setDayIndex(todayDayIndex());
+    setForm({ title: "", body: template === "blank" ? "" : buildWeekFrame() });
   }
 
   async function refresh(nextQuery = query) {
@@ -3505,9 +3749,28 @@ function WeekLogWorkspace({
           >
             <Star size={16} fill={starredOnly ? "currentColor" : "none"} />
           </button>
-          <button className="add-button" onClick={() => newNote()} title={text.newWeeklog}>
-            <CalendarPlus size={17} />
-          </button>
+          <div className="weeklog-new">
+            <button className="add-button" onClick={() => newNote()} title={text.newWeeklog}>
+              <CalendarPlus size={17} />
+            </button>
+            <button
+              className="add-button add-caret"
+              onClick={() => setNewMenuOpen((value) => !value)}
+              title={text.weeklogNewOptions}
+            >
+              <ChevronDown size={13} />
+            </button>
+            {newMenuOpen ? (
+              <>
+                <div className="context-backdrop" onClick={() => setNewMenuOpen(false)} />
+                <div className="weeklog-new-menu">
+                  <button onClick={() => newNote("blank")}>{text.weeklogTemplateBlank}</button>
+                  <button onClick={() => newNote("paged")}>{text.weeklogTemplatePaged}</button>
+                  <button onClick={() => newNote("blocks")}>{text.weeklogTemplateBlocks}</button>
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
 
         <div className="snippet-list">
@@ -3606,20 +3869,44 @@ function WeekLogWorkspace({
             ) : (
             <>
               <div className="code-card weeklog-card">
-                <div className="code-top">
-                  <span className="code-label">{selected ? dateLabel(selected.created_at) : text.newWeeklog}</span>
-                  <span className="weeklog-hint">
-                    {uploading ? (
-                      text.weeklogImageUploading
+                {!blocks ? (
+                  <div className="code-top">
+                    {paged ? (
+                      <span className="weeklog-daynav">
+                        <button
+                          type="button"
+                          className="weeklog-dayarrow"
+                          onClick={() => setDayIndex((i) => Math.max(0, i - 1))}
+                          disabled={dayIndex === 0}
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="code-label">{dayLabels[dayIndex]}</span>
+                        <button
+                          type="button"
+                          className="weeklog-dayarrow"
+                          onClick={() => setDayIndex((i) => Math.min(dayLabels.length - 1, i + 1))}
+                          disabled={dayIndex >= dayLabels.length - 1}
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </span>
                     ) : (
-                      <>
-                        <ImagePlus size={12} />
-                        {text.weeklogImageHint}
-                      </>
+                      <span className="code-label">{selected ? dateLabel(selected.created_at) : text.newWeeklog}</span>
                     )}
-                  </span>
-                  <span className="line-count">{form.body.split("\n").length} {text.lines}</span>
-                </div>
+                    <span className="weeklog-hint">
+                      {uploading ? (
+                        text.weeklogImageUploading
+                      ) : (
+                        <>
+                          <ImagePlus size={12} />
+                          {text.weeklogImageHint}
+                        </>
+                      )}
+                    </span>
+                    <span className="line-count">{(paged ? dayContent : form.body).split("\n").length} {text.lines}</span>
+                  </div>
+                ) : null}
                 {showPreview ? (
                   form.body.trim() ? (
                     <div
@@ -3629,12 +3916,38 @@ function WeekLogWorkspace({
                   ) : (
                     <div className="weeklog-preview-pane empty">{text.weeklogPreviewEmpty}</div>
                   )
+                ) : blocks ? (
+                  <div className="weeklog-blocks">
+                    {dayLabels.map((label, blockIndex) => (
+                      <div className="weeklog-block" key={label}>
+                        <div className="weeklog-block-head">
+                          <span className="code-label">{label}</span>
+                          <span className="weeklog-hint">
+                            <ImagePlus size={12} />
+                            {text.weeklogImageHint}
+                          </span>
+                          <span className="line-count">
+                            {(dayParsed.contents[blockIndex] ?? "").split("\n").length} {text.lines}
+                          </span>
+                        </div>
+                        <textarea
+                          className="weeklog-block-input"
+                          value={dayParsed.contents[blockIndex] ?? ""}
+                          rows={Math.max(2, (dayParsed.contents[blockIndex] ?? "").split("\n").length)}
+                          onChange={(event) => setDayContentAt(blockIndex, event.target.value)}
+                          onPaste={(event) => void handleBlockPaste(event, blockIndex)}
+                          placeholder={text.weeklogDayPlaceholder}
+                          spellCheck={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <textarea
                     ref={textareaRef}
                     className="weeklog-textarea"
-                    value={form.body}
-                    onChange={(event) => setForm({ ...form, body: event.target.value })}
+                    value={dayContent}
+                    onChange={(event) => setDayContent(event.target.value)}
                     onPaste={(event) => void handlePaste(event)}
                     onKeyDown={(event) => {
                       if ((event.metaKey || event.ctrlKey) && event.key === "s") {
@@ -3799,6 +4112,10 @@ function InboxWorkspace({
   const [composeFormat, setComposeFormat] = useState<"markdown" | "text">("markdown");
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: InboxItem } | null>(
+    null,
+  );
 
   const intl = localeTags[locale];
 
@@ -3890,8 +4207,11 @@ function InboxWorkspace({
 
   const selected = items.find((item) => item.id === selectedId) ?? null;
 
-  async function refresh(nextQuery = query) {
-    const rows = await invoke<InboxItem[]>("list_inbox_items", { query: nextQuery.trim() || null });
+  async function refresh(nextQuery = query, archived = showArchived) {
+    const rows = await invoke<InboxItem[]>("list_inbox_items", {
+      query: nextQuery.trim() || null,
+      archived,
+    });
     setItems(rows);
     return rows;
   }
@@ -3899,6 +4219,32 @@ function InboxWorkspace({
   function selectItem(item: InboxItem) {
     setComposeOpen(false);
     setSelectedId(item.id);
+  }
+
+  // Archive / unarchive an item; it leaves the current view, so re-pick selection.
+  async function archiveItem(item: InboxItem, archived: boolean) {
+    setContextMenu(null);
+    try {
+      await invoke("set_inbox_archived", { id: item.id, archived });
+      const rows = await refresh();
+      setStatus(archived ? text.inboxArchived : text.inboxUnarchived);
+      if (item.id === selectedId) setSelectedId(rows[0]?.id ?? null);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function toggleArchivedView() {
+    const next = !showArchived;
+    setShowArchived(next);
+    setContextMenu(null);
+    setComposeOpen(false);
+    try {
+      const rows = await refresh(query, next);
+      setSelectedId(rows[0]?.id ?? null);
+    } catch (error) {
+      showError(error);
+    }
   }
 
   async function remove(item: InboxItem) {
@@ -3996,9 +4342,18 @@ args = ["mcp"]`;
           <button className="add-button" onClick={() => void refresh().catch(showError)} title={text.inboxRefresh}>
             <RotateCcw size={16} />
           </button>
-          <button className="add-button" onClick={openCompose} title={text.inboxNew}>
-            <Plus size={17} />
+          <button
+            className={`add-button ${showArchived ? "archived-on" : ""}`}
+            onClick={() => void toggleArchivedView()}
+            title={showArchived ? text.hideArchived : text.showArchived}
+          >
+            {showArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
           </button>
+          {!showArchived ? (
+            <button className="add-button" onClick={openCompose} title={text.inboxNew}>
+              <Plus size={17} />
+            </button>
+          ) : null}
         </div>
 
         <div className="snippet-list">
@@ -4007,6 +4362,10 @@ args = ["mcp"]`;
               key={item.id}
               className={`snippet-item ${item.id === selectedId ? "selected" : ""}`}
               onClick={() => void selectItem(item)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, item });
+              }}
             >
               <div className="snippet-title-row">
                 <span className="snippet-title">
@@ -4019,7 +4378,9 @@ args = ["mcp"]`;
               </div>
             </button>
           ))}
-          {items.length === 0 ? <div className="empty-list">{text.noInbox}</div> : null}
+          {items.length === 0 ? (
+            <div className="empty-list">{showArchived ? text.noArchivedInbox : text.noInbox}</div>
+          ) : null}
         </div>
       </section>
 
@@ -4220,6 +4581,32 @@ args = ["mcp"]`;
         <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="" />
         </div>
+      ) : null}
+
+      {contextMenu ? (
+        <>
+          <div
+            className="context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div className="snippet-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            {contextMenu.item.archived_at ? (
+              <button onClick={() => void archiveItem(contextMenu.item, false)}>
+                <ArchiveRestore size={13} />
+                {text.inboxUnarchive}
+              </button>
+            ) : (
+              <button onClick={() => void archiveItem(contextMenu.item, true)}>
+                <Archive size={13} />
+                {text.inboxArchive}
+              </button>
+            )}
+          </div>
+        </>
       ) : null}
     </>
   );

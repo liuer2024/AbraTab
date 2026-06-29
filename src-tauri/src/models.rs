@@ -99,6 +99,8 @@ pub struct InboxItem {
     pub format: String,
     pub read: bool,
     pub created_at: String,
+    #[serde(default)]
+    pub archived_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

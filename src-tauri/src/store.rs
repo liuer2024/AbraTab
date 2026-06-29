@@ -462,7 +462,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT id, source, title, body, format, read, created_at
+                SELECT id, source, title, body, format, read, created_at, archived_at
                 FROM inbox_items
                 WHERE id = ?1
                 "#,
@@ -473,38 +473,52 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// List inbox items, optionally filtered by archived state.
+    /// `archived`: `Some(false)` → active only, `Some(true)` → archived only, `None` → all.
     #[allow(dead_code)]
-    pub fn list_inbox_items(&self, query: Option<&str>) -> Result<Vec<InboxItem>> {
+    pub fn list_inbox_items(
+        &self,
+        query: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<Vec<InboxItem>> {
+        let select = "SELECT id, source, title, body, format, read, created_at, archived_at FROM inbox_items";
+        let archived_clause = match archived {
+            Some(true) => "archived_at IS NOT NULL",
+            Some(false) => "archived_at IS NULL",
+            None => "1 = 1",
+        };
         let items = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
             let pattern = format!("%{}%", query.trim().to_lowercase());
-            let mut stmt = self.conn.prepare(
-                r#"
-                SELECT id, source, title, body, format, read, created_at
-                FROM inbox_items
-                WHERE lower(title) LIKE ?1
-                   OR lower(body) LIKE ?1
-                   OR lower(source) LIKE ?1
-                ORDER BY created_at DESC
-                "#,
-            )?;
+            let mut stmt = self.conn.prepare(&format!(
+                "{select}
+                WHERE {archived_clause}
+                  AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1 OR lower(source) LIKE ?1)
+                ORDER BY created_at DESC"
+            ))?;
             let rows = stmt
                 .query_map(params![pattern], row_to_inbox_item)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         } else {
-            let mut stmt = self.conn.prepare(
-                r#"
-                SELECT id, source, title, body, format, read, created_at
-                FROM inbox_items
-                ORDER BY created_at DESC
-                "#,
-            )?;
+            let mut stmt = self.conn.prepare(&format!(
+                "{select} WHERE {archived_clause} ORDER BY created_at DESC"
+            ))?;
             let rows = stmt
                 .query_map([], row_to_inbox_item)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         };
         Ok(items)
+    }
+
+    #[allow(dead_code)]
+    pub fn set_inbox_archived(&self, id: &str, archived: bool) -> Result<()> {
+        let archived_at = if archived { Some(now_string()) } else { None };
+        self.conn.execute(
+            "UPDATE inbox_items SET archived_at = ?2 WHERE id = ?1",
+            params![id, archived_at],
+        )?;
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -814,17 +828,27 @@ impl Store {
         let format = if item.format.trim().is_empty() { "markdown" } else { item.format.trim() };
         self.conn.execute(
             r#"
-            INSERT INTO inbox_items (id, source, title, body, format, read, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO inbox_items (id, source, title, body, format, read, created_at, archived_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(id) DO UPDATE SET
                 source = excluded.source,
                 title = excluded.title,
                 body = excluded.body,
                 format = excluded.format,
                 read = excluded.read,
-                created_at = excluded.created_at
+                created_at = excluded.created_at,
+                archived_at = excluded.archived_at
             "#,
-            params![item.id, item.source, item.title, item.body, format, item.read, item.created_at],
+            params![
+                item.id,
+                item.source,
+                item.title,
+                item.body,
+                format,
+                item.read,
+                item.created_at,
+                item.archived_at
+            ],
         )?;
         Ok(())
     }
@@ -840,7 +864,7 @@ impl Store {
             tracks: self.list_tracks(None, None)?,
             track_entries: self.list_all_track_entries()?,
             projects: self.list_projects(None)?,
-            inbox_items: self.list_inbox_items(None)?,
+            inbox_items: self.list_inbox_items(None, None)?,
         })
     }
 
@@ -1106,6 +1130,7 @@ impl Store {
         self.add_column_if_missing("projects", "tags", "TEXT NOT NULL DEFAULT '[]'")?;
         self.add_column_if_missing("inbox_items", "format", "TEXT NOT NULL DEFAULT 'markdown'")?;
         self.add_column_if_missing("tracks", "archived_at", "TEXT")?;
+        self.add_column_if_missing("inbox_items", "archived_at", "TEXT")?;
 
         Ok(())
     }
@@ -1277,6 +1302,7 @@ fn row_to_inbox_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboxItem> {
         format: row.get(4)?,
         read: row.get(5)?,
         created_at: row.get(6)?,
+        archived_at: row.get(7)?,
     })
 }
 
