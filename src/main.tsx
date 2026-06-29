@@ -6,6 +6,7 @@ import {
   Activity,
   Archive,
   ArchiveRestore,
+  BookOpen,
   CalendarDays,
   CalendarPlus,
   CalendarRange,
@@ -170,7 +171,7 @@ type UploadResult = {
 };
 
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "track" | "project" | "inbox";
+type JournalMode = "weeklog" | "track" | "project" | "inbox" | "book";
 
 type WeekLog = {
   id: string;
@@ -226,6 +227,45 @@ type InboxItem = {
   read: boolean;
   created_at: string;
   archived_at: string | null;
+};
+
+type BookStatus = "want" | "reading" | "finished";
+
+type Book = {
+  id: string;
+  title: string;
+  author: string;
+  cover_url: string;
+  intro: string;
+  status: BookStatus;
+  rating: number;
+  start_date: string;
+  end_date: string;
+  thoughts: string;
+  created_at: string;
+  updated_at: string;
+  excerpt_count: number;
+};
+
+type BookExcerpt = {
+  id: string;
+  book_id: string;
+  text: string;
+  page: string;
+  created_at: string;
+};
+
+type BookForm = {
+  id?: string;
+  title: string;
+  author: string;
+  cover_url: string;
+  intro: string;
+  status: BookStatus;
+  rating: number;
+  start_date: string;
+  end_date: string;
+  thoughts: string;
 };
 
 type InboxConnectionInfo = {
@@ -801,6 +841,42 @@ const translations = {
     projectTagSet: "打标签",
     projectTagPlaceholder: "用逗号分隔，如：工作, 重要",
     projectDeleted: "已删除项目",
+    wsBook: "读书",
+    bookUnit: "本书",
+    newBook: "新建图书",
+    searchBooks: "搜索书名 / 作者…",
+    noBooks: "还没有读书记录，新建一本开始。",
+    untitledBook: "未命名图书",
+    bookTitlePlaceholder: "书名",
+    bookAuthor: "作者",
+    bookAuthorPlaceholder: "作者",
+    bookCover: "封面",
+    bookCoverHint: "点击上传本地图片作为封面",
+    bookCoverUrl: "封面链接",
+    bookCoverUpload: "上传图片",
+    bookCoverView: "查看图片",
+    bookCoverUrlPlaceholder: "粘贴图片链接",
+    bookCoverUploading: "封面上传中…",
+    bookIntro: "简介",
+    bookIntroPlaceholder: "这本书讲了什么…",
+    bookStatus: "状态",
+    bookStatusWant: "想读",
+    bookStatusReading: "在读",
+    bookStatusFinished: "已读",
+    bookStart: "开始",
+    bookEnd: "读完",
+    bookRating: "评分",
+    bookThoughts: "感想",
+    bookThoughtsPlaceholder: "读完的感想、收获…",
+    bookExcerpts: "精彩摘录",
+    bookExcerptPlaceholder: "记下打动你的一段文字…",
+    bookExcerptPage: "页码",
+    bookExcerptAdd: "添加",
+    bookExcerptUnit: "条摘录",
+    bookAllAuthors: "全部作者",
+    bookSaved: "已保存图书",
+    bookDeleted: "已删除图书",
+    bookPickHint: "从左侧选择一本书，或新建一本开始记录。",
     wsInbox: "收件箱",
     inboxUnit: "条",
     inboxUnread: "未读",
@@ -1107,6 +1183,42 @@ const translations = {
     projectTagSet: "Set tags",
     projectTagPlaceholder: "Comma-separated, e.g. work, important",
     projectDeleted: "Project deleted",
+    wsBook: "Reading",
+    bookUnit: "books",
+    newBook: "Add book",
+    searchBooks: "Search title / author…",
+    noBooks: "No books yet — add one to start.",
+    untitledBook: "Untitled book",
+    bookTitlePlaceholder: "Title",
+    bookAuthor: "Author",
+    bookAuthorPlaceholder: "Author",
+    bookCover: "Cover",
+    bookCoverHint: "Click to upload a local image",
+    bookCoverUrl: "Cover URL",
+    bookCoverUpload: "Upload image",
+    bookCoverView: "View image",
+    bookCoverUrlPlaceholder: "Paste an image URL",
+    bookCoverUploading: "Uploading cover…",
+    bookIntro: "About",
+    bookIntroPlaceholder: "What's this book about…",
+    bookStatus: "Status",
+    bookStatusWant: "To read",
+    bookStatusReading: "Reading",
+    bookStatusFinished: "Finished",
+    bookStart: "Started",
+    bookEnd: "Finished",
+    bookRating: "Rating",
+    bookThoughts: "Thoughts",
+    bookThoughtsPlaceholder: "Takeaways, impressions…",
+    bookExcerpts: "Excerpts",
+    bookExcerptPlaceholder: "A passage that struck you…",
+    bookExcerptPage: "Page",
+    bookExcerptAdd: "Add",
+    bookExcerptUnit: "excerpts",
+    bookAllAuthors: "All authors",
+    bookSaved: "Book saved",
+    bookDeleted: "Book deleted",
+    bookPickHint: "Pick a book on the left, or add one to start.",
     wsInbox: "Inbox",
     inboxUnit: "items",
     inboxUnread: "unread",
@@ -1413,6 +1525,42 @@ const translations = {
     projectTagSet: "タグを設定",
     projectTagPlaceholder: "カンマ区切り、例：仕事, 重要",
     projectDeleted: "プロジェクトを削除しました",
+    wsBook: "読書",
+    bookUnit: "冊",
+    newBook: "本を追加",
+    searchBooks: "書名 / 著者を検索…",
+    noBooks: "まだ記録がありません。追加して始めましょう。",
+    untitledBook: "無題の本",
+    bookTitlePlaceholder: "書名",
+    bookAuthor: "著者",
+    bookAuthorPlaceholder: "著者",
+    bookCover: "表紙",
+    bookCoverHint: "クリックでローカル画像をアップロード",
+    bookCoverUrl: "表紙URL",
+    bookCoverUpload: "画像をアップロード",
+    bookCoverView: "画像を表示",
+    bookCoverUrlPlaceholder: "画像URLを貼り付け",
+    bookCoverUploading: "表紙をアップロード中…",
+    bookIntro: "紹介",
+    bookIntroPlaceholder: "この本の内容…",
+    bookStatus: "状態",
+    bookStatusWant: "未読",
+    bookStatusReading: "読書中",
+    bookStatusFinished: "読了",
+    bookStart: "開始",
+    bookEnd: "読了",
+    bookRating: "評価",
+    bookThoughts: "感想",
+    bookThoughtsPlaceholder: "学び・感想…",
+    bookExcerpts: "抜粋",
+    bookExcerptPlaceholder: "心に残った一節…",
+    bookExcerptPage: "ページ",
+    bookExcerptAdd: "追加",
+    bookExcerptUnit: "件の抜粋",
+    bookAllAuthors: "すべての著者",
+    bookSaved: "本を保存しました",
+    bookDeleted: "本を削除しました",
+    bookPickHint: "左から本を選ぶか、追加して始めましょう。",
     wsInbox: "受信箱",
     inboxUnit: "件",
     inboxUnread: "未読",
@@ -2128,6 +2276,18 @@ function App() {
         />
       ) : workspace === "journal" && journalMode === "inbox" ? (
         <InboxWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" && journalMode === "book" ? (
+        <BookWorkspace
           text={text}
           locale={locale}
           workspace={workspace}
@@ -3221,6 +3381,124 @@ function JournalHeatmap({ locale }: { locale: Locale }) {
   );
 }
 
+// Lightweight calendar date picker (no external deps), styled to match the app.
+function DatePicker({
+  value,
+  onChange,
+  locale,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  locale: Locale;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const intl = localeTags[locale];
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const parse = (v: string): Date | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+  };
+
+  const selected = parse(value);
+  const ref = selected ?? new Date();
+  const view = new Date(ref.getFullYear(), ref.getMonth() + offset, 1);
+  const year = view.getFullYear();
+  const month = view.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leading = (new Date(year, month, 1).getDay() + 6) % 7;
+  const todayStr = ymd(new Date());
+
+  const weekdayFmt = new Intl.DateTimeFormat(intl, { weekday: "narrow" });
+  const weekdays = Array.from({ length: 7 }, (_, i) => weekdayFmt.format(new Date(2024, 0, 1 + i)));
+  const monthLabel = new Intl.DateTimeFormat(intl, { year: "numeric", month: "long" }).format(view);
+  const displayLabel = selected
+    ? new Intl.DateTimeFormat(intl, { year: "numeric", month: "numeric", day: "numeric" }).format(selected)
+    : "";
+
+  const cells: Array<number | null> = [];
+  for (let i = 0; i < leading; i += 1) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
+
+  function pick(day: number) {
+    onChange(ymd(new Date(year, month, day)));
+    setOpen(false);
+    setOffset(0);
+  }
+
+  return (
+    <div className="datepicker">
+      <button
+        type="button"
+        className={`datepicker-input ${selected ? "" : "empty"}`}
+        onClick={() => {
+          setOffset(0);
+          setOpen((o) => !o);
+        }}
+      >
+        <CalendarDays size={13} />
+        <span>{displayLabel || placeholder || ""}</span>
+        {selected ? (
+          <span
+            className="datepicker-clear"
+            role="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            <X size={12} />
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <>
+          <div className="context-backdrop" onClick={() => setOpen(false)} />
+          <div className="datepicker-pop">
+            <div className="datepicker-head">
+              <button type="button" onClick={() => setOffset((v) => v - 1)}>
+                <ChevronLeft size={14} />
+              </button>
+              <span>{monthLabel}</span>
+              <button type="button" onClick={() => setOffset((v) => v + 1)}>
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            <div className="datepicker-week">
+              {weekdays.map((w, i) => (
+                <span key={i}>{w}</span>
+              ))}
+            </div>
+            <div className="datepicker-grid">
+              {cells.map((d, i) =>
+                d === null ? (
+                  <span key={`blank-${i}`} className="datepicker-cell empty" />
+                ) : (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`datepicker-cell ${ymd(new Date(year, month, d)) === value ? "selected" : ""} ${
+                      ymd(new Date(year, month, d)) === todayStr ? "today" : ""
+                    }`}
+                    onClick={() => pick(d)}
+                  >
+                    {d}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function JournalModeNav({
   mode,
   setMode,
@@ -3235,6 +3513,7 @@ function JournalModeNav({
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
     { id: "track", label: text.wsTrack, Icon: Activity },
     { id: "project", label: text.wsProject, Icon: FolderGit2 },
+    { id: "book", label: text.wsBook, Icon: BookOpen },
   ];
   return (
     <>
@@ -5046,6 +5325,658 @@ function ProjectWorkspace({
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function BookWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [books, setBooks] = useState<Book[]>([]);
+  const [authors, setAuthors] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
+  const [form, setForm] = useState<BookForm | null>(null);
+  const [excerpts, setExcerpts] = useState<BookExcerpt[]>([]);
+  const [newExcerpt, setNewExcerpt] = useState("");
+  const [newPage, setNewPage] = useState("");
+  const [editingExcerptId, setEditingExcerptId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editPage, setEditPage] = useState("");
+  const [status, setStatus] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [coverMenuOpen, setCoverMenuOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+
+  const intl = localeTags[locale];
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  const STATUSES: BookStatus[] = ["want", "reading", "finished"];
+  function statusLabel(value: BookStatus) {
+    if (value === "reading") return text.bookStatusReading;
+    if (value === "finished") return text.bookStatusFinished;
+    return text.bookStatusWant;
+  }
+
+  function monthLabel(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat(intl, { year: "numeric", month: "long" }).format(date);
+  }
+
+  // Group books by their added month (newest first), with a header per month.
+  const groups = useMemo(() => {
+    const sorted = [...books].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    const out: Array<{ label: string; items: Book[] }> = [];
+    for (const book of sorted) {
+      const label = monthLabel(book.created_at) || text.wsBook;
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.items.push(book);
+      else out.push({ label, items: [book] });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [books, intl]);
+
+  async function refreshBooks(nextQuery = query, author = authorFilter) {
+    const rows = await invoke<Book[]>("list_books", {
+      query: nextQuery.trim() || null,
+      author: author || null,
+    });
+    setBooks(rows);
+    return rows;
+  }
+
+  async function refreshAuthors() {
+    setAuthors(await invoke<string[]>("list_book_authors"));
+  }
+
+  async function loadExcerpts(bookId: string) {
+    setExcerpts(await invoke<BookExcerpt[]>("list_book_excerpts", { bookId }));
+  }
+
+  function toForm(book: Book): BookForm {
+    return {
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      cover_url: book.cover_url,
+      intro: book.intro,
+      status: book.status,
+      rating: book.rating,
+      start_date: book.start_date,
+      end_date: book.end_date,
+      thoughts: book.thoughts,
+    };
+  }
+
+  async function selectBook(book: Book) {
+    setSelectedId(book.id);
+    setForm(toForm(book));
+    setNewExcerpt("");
+    setNewPage("");
+    setEditingExcerptId(null);
+    await loadExcerpts(book.id);
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await refreshBooks("");
+      await refreshAuthors();
+      if (rows.length) await selectBook(rows[0]);
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function createBook() {
+    try {
+      const book = await invoke<Book>("save_book", { input: { status: "want" } });
+      await refreshBooks();
+      await refreshAuthors();
+      await selectBook(book);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  // Persist the form. Pass a patch for fields saved immediately (status/rating/date/cover).
+  async function saveForm(patch?: Partial<BookForm>) {
+    const current = form;
+    if (!current) return;
+    const merged = { ...current, ...patch };
+    if (patch) setForm(merged);
+    try {
+      await invoke<Book>("save_book", {
+        input: {
+          id: merged.id,
+          title: merged.title,
+          author: merged.author,
+          cover_url: merged.cover_url,
+          intro: merged.intro,
+          status: merged.status,
+          rating: merged.rating,
+          start_date: merged.start_date,
+          end_date: merged.end_date,
+          thoughts: merged.thoughts,
+        },
+      });
+      await refreshBooks();
+      await refreshAuthors();
+      setStatus(text.bookSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function deleteBook() {
+    if (!form?.id) return;
+    try {
+      await invoke("delete_book", { id: form.id });
+      const rows = await refreshBooks();
+      await refreshAuthors();
+      setStatus(text.bookDeleted);
+      if (rows.length) {
+        await selectBook(rows[0]);
+      } else {
+        setSelectedId(null);
+        setForm(null);
+        setExcerpts([]);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function onCoverFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !form) return;
+    setUploading(true);
+    setStatus(text.bookCoverUploading);
+    try {
+      const data = await fileToBase64(file);
+      const result = await invoke<UploadResult>("upload_image", {
+        filename: imageFilename(file),
+        data,
+      });
+      await saveForm({ cover_url: result.url });
+      setCoverMenuOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(/not configured/i.test(message) ? text.weeklogImageNotConfigured : message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function applyAuthor(author: string | null) {
+    setAuthorFilter(author);
+    void refreshBooks(query, author).catch(showError);
+  }
+
+  async function addExcerpt() {
+    const body = newExcerpt.trim();
+    if (!form?.id || !body) return;
+    try {
+      await invoke<BookExcerpt>("add_book_excerpt", {
+        input: { book_id: form.id, text: body, page: newPage.trim() },
+      });
+      setNewExcerpt("");
+      setNewPage("");
+      await loadExcerpts(form.id);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  function startEditExcerpt(ex: BookExcerpt) {
+    setEditingExcerptId(ex.id);
+    setEditText(ex.text);
+    setEditPage(ex.page);
+  }
+
+  async function saveEditExcerpt() {
+    const id = editingExcerptId;
+    if (!id) return;
+    const body = editText.trim();
+    setEditingExcerptId(null);
+    if (!body) return;
+    try {
+      await invoke("update_book_excerpt", { id, text: body, page: editPage.trim() });
+      if (form?.id) await loadExcerpts(form.id);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function deleteExcerpt(id: string) {
+    try {
+      await invoke("delete_book_excerpt", { id });
+      if (form?.id) await loadExcerpts(form.id);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <Activity size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{books.length} {text.bookUnit}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <JournalHeatmap locale={locale} />
+
+        <div className="nav-foot">
+          <button title={text.newBook} onClick={() => void createBook()}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsBook}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refreshBooks(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchBooks}
+            />
+          </label>
+          <button className="add-button" onClick={() => void createBook()} title={text.newBook}>
+            <Plus size={17} />
+          </button>
+        </div>
+
+        {authors.length ? (
+          <div className="book-authors">
+            <button className={!authorFilter ? "on" : ""} onClick={() => applyAuthor(null)}>
+              {text.bookAllAuthors}
+            </button>
+            {authors.map((author) => (
+              <button
+                key={author}
+                className={authorFilter === author ? "on" : ""}
+                onClick={() => applyAuthor(author)}
+              >
+                {author}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="snippet-list">
+          {groups.map((group) => (
+            <React.Fragment key={group.label}>
+              <div className="weeklog-group">{group.label}</div>
+              {group.items.map((book) => (
+                <button
+                  key={book.id}
+                  className={`snippet-item book-item ${book.id === selectedId ? "selected" : ""}`}
+                  onClick={() => void selectBook(book)}
+                >
+                  <div className="book-thumb">
+                    {book.cover_url ? <img src={book.cover_url} alt="" /> : <BookOpen size={16} />}
+                  </div>
+                  <div className="book-item-main">
+                    <span className="snippet-title">{book.title.trim() || text.untitledBook}</span>
+                    <div className="book-item-meta">
+                      <span className={`book-status book-status-${book.status}`}>
+                        {statusLabel(book.status)}
+                      </span>
+                      {book.author ? <span className="book-item-author">{book.author}</span> : null}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </React.Fragment>
+          ))}
+          {books.length === 0 ? <div className="empty-list">{text.noBooks}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <BookOpen size={11} />
+              {form ? statusLabel(form.status) : text.wsBook}
+            </div>
+            <input
+              value={form?.title ?? ""}
+              onChange={(event) => form && setForm({ ...form, title: event.target.value })}
+              onBlur={() => void saveForm()}
+              placeholder={text.bookTitlePlaceholder}
+              disabled={!form}
+            />
+          </div>
+          <div className="editor-tools">
+            {form ? (
+              <button className="icon-button" title={text.delete} onClick={() => void deleteBook()}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {form ? (
+            <div className="book-form">
+              <div className="book-form-top">
+                <div className="book-cover-col">
+                  <div className="book-cover" onClick={() => setCoverMenuOpen(true)}>
+                    {form.cover_url ? (
+                      <img src={form.cover_url} alt="" />
+                    ) : (
+                      <div className="book-cover-empty">
+                        <ImagePlus size={20} />
+                        <span>{uploading ? text.bookCoverUploading : text.bookCoverHint}</span>
+                      </div>
+                    )}
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(event) => void onCoverFile(event)}
+                    />
+                  </div>
+                </div>
+
+                <div className="book-fields">
+                  <label className="book-field">
+                    <span>{text.bookAuthor}</span>
+                    <input
+                      value={form.author}
+                      onChange={(event) => setForm({ ...form, author: event.target.value })}
+                      onBlur={() => void saveForm()}
+                      placeholder={text.bookAuthorPlaceholder}
+                    />
+                  </label>
+
+                  <div className="book-field">
+                    <span>{text.bookStatus}</span>
+                    <div className="segmented">
+                      {STATUSES.map((s) => (
+                        <button
+                          key={s}
+                          className={form.status === s ? "selected" : ""}
+                          onClick={() => void saveForm({ status: s })}
+                        >
+                          {statusLabel(s)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="book-dates">
+                    <div className="book-field">
+                      <span>{text.bookStart}</span>
+                      <DatePicker
+                        value={form.start_date}
+                        onChange={(value) => void saveForm({ start_date: value })}
+                        locale={locale}
+                        placeholder="—"
+                      />
+                    </div>
+                    <div className="book-field">
+                      <span>{text.bookEnd}</span>
+                      <DatePicker
+                        value={form.end_date}
+                        onChange={(value) => void saveForm({ end_date: value })}
+                        locale={locale}
+                        placeholder="—"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="book-field">
+                <span>{text.bookRating}</span>
+                <div className="book-rating">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className="book-star"
+                      onClick={() => void saveForm({ rating: form.rating === n ? 0 : n })}
+                    >
+                      <Star size={16} fill={n <= form.rating ? "currentColor" : "none"} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="book-field">
+                <span>{text.bookIntro}</span>
+                <textarea
+                  className="book-textarea"
+                  value={form.intro}
+                  onChange={(event) => setForm({ ...form, intro: event.target.value })}
+                  onBlur={() => void saveForm()}
+                  placeholder={text.bookIntroPlaceholder}
+                  rows={3}
+                />
+              </label>
+
+              <label className="book-field">
+                <span>{text.bookThoughts}</span>
+                <textarea
+                  className="book-textarea"
+                  value={form.thoughts}
+                  onChange={(event) => setForm({ ...form, thoughts: event.target.value })}
+                  onBlur={() => void saveForm()}
+                  placeholder={text.bookThoughtsPlaceholder}
+                  rows={4}
+                />
+              </label>
+
+              <div className="book-field">
+                <span>
+                  {text.bookExcerpts}
+                  {excerpts.length ? ` · ${excerpts.length} ${text.bookExcerptUnit}` : ""}
+                </span>
+                <div className="book-excerpt-add">
+                  <textarea
+                    value={newExcerpt}
+                    onChange={(event) => setNewExcerpt(event.target.value)}
+                    placeholder={text.bookExcerptPlaceholder}
+                    rows={2}
+                  />
+                  <div className="book-excerpt-add-foot">
+                    <input
+                      className="book-page-input"
+                      value={newPage}
+                      onChange={(event) => setNewPage(event.target.value)}
+                      placeholder={text.bookExcerptPage}
+                    />
+                    <button
+                      type="button"
+                      className="snippet-save"
+                      onClick={() => void addExcerpt()}
+                      disabled={!newExcerpt.trim()}
+                    >
+                      <Plus size={13} />
+                      {text.bookExcerptAdd}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="book-excerpt-list">
+                  {excerpts.map((ex) =>
+                    editingExcerptId === ex.id ? (
+                      <div className="book-excerpt editing" key={ex.id}>
+                        <textarea
+                          value={editText}
+                          onChange={(event) => setEditText(event.target.value)}
+                          rows={2}
+                          autoFocus
+                        />
+                        <div className="book-excerpt-add-foot">
+                          <input
+                            className="book-page-input"
+                            value={editPage}
+                            onChange={(event) => setEditPage(event.target.value)}
+                            placeholder={text.bookExcerptPage}
+                          />
+                          <button type="button" className="snippet-save" onClick={() => void saveEditExcerpt()}>
+                            <Check size={13} />
+                            {text.save}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="book-excerpt" key={ex.id}>
+                        <div className="book-excerpt-text">{ex.text}</div>
+                        <div className="book-excerpt-foot">
+                          {ex.page ? <span className="book-excerpt-page">P{ex.page}</span> : <span />}
+                          <div className="book-excerpt-actions">
+                            <button
+                              type="button"
+                              className="timeline-action"
+                              title={text.editEntry}
+                              onClick={() => startEditExcerpt(ex)}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="timeline-action"
+                              title={text.delete}
+                              onClick={() => void deleteExcerpt(ex.id)}
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="weeklog-empty-editor">{text.bookPickHint}</div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <BookOpen size={13} />
+            {text.wsBook}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+
+      {coverMenuOpen && form ? (
+        <div
+          className="prompt-overlay"
+          role="presentation"
+          onMouseDown={() => {
+            void saveForm();
+            setCoverMenuOpen(false);
+          }}
+        >
+          <div className="book-cover-dialog" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="book-cover-actions">
+              <button
+                type="button"
+                className="book-cover-upload"
+                onClick={() => coverInputRef.current?.click()}
+              >
+                <ImagePlus size={13} />
+                {uploading ? text.bookCoverUploading : text.bookCoverUpload}
+              </button>
+              {form.cover_url.trim() ? (
+                <button
+                  type="button"
+                  className="book-cover-upload"
+                  onClick={() => {
+                    const url = form.cover_url;
+                    setCoverMenuOpen(false);
+                    setLightbox(url);
+                  }}
+                >
+                  <Eye size={13} />
+                  {text.bookCoverView}
+                </button>
+              ) : null}
+            </div>
+            <input
+              className="book-cover-url"
+              value={form.cover_url}
+              onChange={(event) => setForm({ ...form, cover_url: event.target.value })}
+              placeholder={text.bookCoverUrlPlaceholder}
+              autoFocus
+            />
+            <button
+              type="button"
+              className="book-cover-save"
+              onClick={() => {
+                void saveForm();
+                setCoverMenuOpen(false);
+              }}
+            >
+              {text.save}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {lightbox ? (
+        <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="" />
         </div>
       ) : null}
     </>

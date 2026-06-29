@@ -6,8 +6,8 @@ mod store;
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
 use qiniu::{QiniuStatus, UploadResult};
 use models::{
-    DayActivity, InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry,
-    TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, InboxItem, Project, ProjectInput,
+    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -451,6 +451,48 @@ fn delete_track_entry(id: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn list_books(query: Option<String>, author: Option<String>) -> Result<Vec<Book>, AppError> {
+    Ok(Store::open_default()?.list_books(query.as_deref(), author.as_deref())?)
+}
+
+#[tauri::command]
+fn list_book_authors() -> Result<Vec<String>, AppError> {
+    Ok(Store::open_default()?.list_book_authors()?)
+}
+
+#[tauri::command]
+fn save_book(input: BookInput) -> Result<Book, AppError> {
+    Ok(Store::open_default()?.save_book(input)?)
+}
+
+#[tauri::command]
+fn delete_book(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_book(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_book_excerpts(book_id: String) -> Result<Vec<BookExcerpt>, AppError> {
+    Ok(Store::open_default()?.list_book_excerpts(&book_id)?)
+}
+
+#[tauri::command]
+fn add_book_excerpt(input: BookExcerptInput) -> Result<BookExcerpt, AppError> {
+    Ok(Store::open_default()?.add_book_excerpt(input)?)
+}
+
+#[tauri::command]
+fn update_book_excerpt(id: String, text: String, page: String) -> Result<BookExcerpt, AppError> {
+    Ok(Store::open_default()?.update_book_excerpt(&id, &text, &page)?)
+}
+
+#[tauri::command]
+fn delete_book_excerpt(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_book_excerpt(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn gitee_sync_status() -> Result<GiteeSyncStatus, AppError> {
     Ok(gitee_sync::load_status()?)
 }
@@ -861,6 +903,14 @@ pub fn run() {
             add_track_entry,
             update_track_entry,
             delete_track_entry,
+            list_books,
+            list_book_authors,
+            save_book,
+            delete_book,
+            list_book_excerpts,
+            add_book_excerpt,
+            update_book_excerpt,
+            delete_book_excerpt,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,

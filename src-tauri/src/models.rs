@@ -138,3 +138,58 @@ pub struct TrackEntryInput {
     pub track_id: String,
     pub body: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Book {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub cover_url: String,
+    pub intro: String,
+    pub status: String, // want / reading / finished
+    #[serde(default)]
+    pub rating: i64, // 0 = unrated, 1-5 stars
+    #[serde(default)]
+    pub start_date: String,
+    #[serde(default)]
+    pub end_date: String,
+    pub thoughts: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub excerpt_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct BookInput {
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub cover_url: Option<String>,
+    pub intro: Option<String>,
+    pub status: Option<String>,
+    pub rating: Option<i64>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub thoughts: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookExcerpt {
+    pub id: String,
+    pub book_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub page: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct BookExcerptInput {
+    pub book_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub page: String,
+}

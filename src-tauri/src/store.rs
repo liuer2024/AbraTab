@@ -1,6 +1,6 @@
 use crate::models::{
-    DayActivity, InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry,
-    TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, InboxItem, Project, ProjectInput,
+    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -547,6 +547,258 @@ impl Store {
         Ok(())
     }
 
+    // ---- Books ----
+
+    #[allow(dead_code)]
+    pub fn list_books(&self, query: Option<&str>, author: Option<&str>) -> Result<Vec<Book>> {
+        let select = r#"
+            SELECT b.id, b.title, b.author, b.cover_url, b.intro, b.status, b.rating,
+                   b.start_date, b.end_date, b.thoughts, b.created_at, b.updated_at,
+                   (SELECT COUNT(*) FROM book_excerpts e WHERE e.book_id = b.id) AS excerpt_count
+            FROM books b
+        "#;
+        let mut books = if let Some(q) = query.filter(|v| !v.trim().is_empty()) {
+            let pattern = format!("%{}%", q.trim().to_lowercase());
+            let mut stmt = self.conn.prepare(&format!(
+                "{select}
+                WHERE lower(b.title) LIKE ?1 OR lower(b.author) LIKE ?1 OR lower(b.intro) LIKE ?1
+                ORDER BY b.updated_at DESC"
+            ))?;
+            let rows = stmt
+                .query_map(params![pattern], row_to_book)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        } else {
+            let mut stmt = self
+                .conn
+                .prepare(&format!("{select} ORDER BY b.updated_at DESC"))?;
+            let rows = stmt
+                .query_map([], row_to_book)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        if let Some(author) = author.filter(|v| !v.trim().is_empty()) {
+            let author = author.trim();
+            books.retain(|b| b.author == author);
+        }
+        Ok(books)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_book(&self, id: &str) -> Result<Option<Book>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT b.id, b.title, b.author, b.cover_url, b.intro, b.status, b.rating,
+                       b.start_date, b.end_date, b.thoughts, b.created_at, b.updated_at,
+                       (SELECT COUNT(*) FROM book_excerpts e WHERE e.book_id = b.id) AS excerpt_count
+                FROM books b
+                WHERE b.id = ?1
+                "#,
+                params![id],
+                row_to_book,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    pub fn list_book_authors(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT author FROM books WHERE trim(author) <> '' ORDER BY author")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    pub fn save_book(&self, input: BookInput) -> Result<Book> {
+        let now = now_string();
+        let id = input
+            .id
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(new_book_id);
+        let existing = self.get_book(&id)?;
+        let created_at = existing
+            .as_ref()
+            .map(|b| b.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let status = input
+            .status
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "want".to_string());
+        self.conn.execute(
+            r#"
+            INSERT INTO books (id, title, author, cover_url, intro, status, rating,
+                start_date, end_date, thoughts, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                author = excluded.author,
+                cover_url = excluded.cover_url,
+                intro = excluded.intro,
+                status = excluded.status,
+                rating = excluded.rating,
+                start_date = excluded.start_date,
+                end_date = excluded.end_date,
+                thoughts = excluded.thoughts,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                id,
+                input.title.unwrap_or_default(),
+                input.author.unwrap_or_default(),
+                input.cover_url.unwrap_or_default(),
+                input.intro.unwrap_or_default(),
+                status,
+                input.rating.unwrap_or(0),
+                input.start_date.unwrap_or_default(),
+                input.end_date.unwrap_or_default(),
+                input.thoughts.unwrap_or_default(),
+                created_at,
+                now,
+            ],
+        )?;
+        self.get_book(&id)?.context("book was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_book(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM book_excerpts WHERE book_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM books WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn list_book_excerpts(&self, book_id: &str) -> Result<Vec<BookExcerpt>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, book_id, text, page, created_at FROM book_excerpts WHERE book_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![book_id], row_to_book_excerpt)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    fn list_all_book_excerpts(&self) -> Result<Vec<BookExcerpt>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, book_id, text, page, created_at FROM book_excerpts ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_book_excerpt)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    pub fn add_book_excerpt(&self, input: BookExcerptInput) -> Result<BookExcerpt> {
+        let now = now_string();
+        let id = new_book_excerpt_id();
+        self.conn.execute(
+            "INSERT INTO book_excerpts (id, book_id, text, page, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, input.book_id, input.text, input.page, now],
+        )?;
+        self.conn.execute(
+            "UPDATE books SET updated_at = ?2 WHERE id = ?1",
+            params![input.book_id, now],
+        )?;
+        self.get_book_excerpt(&id)?.context("book excerpt was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn update_book_excerpt(&self, id: &str, text: &str, page: &str) -> Result<BookExcerpt> {
+        self.conn.execute(
+            "UPDATE book_excerpts SET text = ?2, page = ?3 WHERE id = ?1",
+            params![id, text, page],
+        )?;
+        self.get_book_excerpt(id)?.context("book excerpt not found")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_book_excerpt(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM book_excerpts WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn get_book_excerpt(&self, id: &str) -> Result<Option<BookExcerpt>> {
+        self.conn
+            .query_row(
+                "SELECT id, book_id, text, page, created_at FROM book_excerpts WHERE id = ?1",
+                params![id],
+                row_to_book_excerpt,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_book(&self, book: &Book) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO books (id, title, author, cover_url, intro, status, rating,
+                start_date, end_date, thoughts, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                author = excluded.author,
+                cover_url = excluded.cover_url,
+                intro = excluded.intro,
+                status = excluded.status,
+                rating = excluded.rating,
+                start_date = excluded.start_date,
+                end_date = excluded.end_date,
+                thoughts = excluded.thoughts,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                book.id,
+                book.title,
+                book.author,
+                book.cover_url,
+                book.intro,
+                book.status,
+                book.rating,
+                book.start_date,
+                book.end_date,
+                book.thoughts,
+                book.created_at,
+                book.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_book_excerpt(&self, excerpt: &BookExcerpt) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO book_excerpts (id, book_id, text, page, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+                book_id = excluded.book_id,
+                text = excluded.text,
+                page = excluded.page,
+                created_at = excluded.created_at
+            "#,
+            params![
+                excerpt.id,
+                excerpt.book_id,
+                excerpt.text,
+                excerpt.page,
+                excerpt.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Per-day record counts (weeklogs + idea entries + inbox + projects) within
     /// an inclusive YYYY-MM-DD range, for the activity heatmap.
     #[allow(dead_code)]
@@ -856,7 +1108,7 @@ impl Store {
     #[allow(dead_code)]
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 5,
+            schema: 6,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
@@ -865,12 +1117,14 @@ impl Store {
             track_entries: self.list_all_track_entries()?,
             projects: self.list_projects(None)?,
             inbox_items: self.list_inbox_items(None, None)?,
+            books: self.list_books(None, None)?,
+            book_excerpts: self.list_all_book_excerpts()?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 5 {
+        if snapshot.schema == 0 || snapshot.schema > 6 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -950,6 +1204,29 @@ impl Store {
                 result.skipped += 1;
             } else {
                 self.upsert_snapshot_inbox_item(&item)?;
+                result.inserted += 1;
+            }
+        }
+        for book in snapshot.books {
+            match self.get_book(&book.id)? {
+                Some(existing) if existing.updated_at >= book.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_book(&book)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_book(&book)?;
+                    result.inserted += 1;
+                }
+            }
+        }
+        for excerpt in snapshot.book_excerpts {
+            if self.get_book_excerpt(&excerpt.id)?.is_some() {
+                result.skipped += 1;
+            } else {
+                self.upsert_snapshot_book_excerpt(&excerpt)?;
                 result.inserted += 1;
             }
         }
@@ -1119,6 +1396,32 @@ impl Store {
             );
 
             CREATE INDEX IF NOT EXISTS inbox_created_idx ON inbox_items(created_at);
+
+            CREATE TABLE IF NOT EXISTS books (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                author TEXT NOT NULL DEFAULT '',
+                cover_url TEXT NOT NULL DEFAULT '',
+                intro TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'want',
+                rating INTEGER NOT NULL DEFAULT 0,
+                start_date TEXT NOT NULL DEFAULT '',
+                end_date TEXT NOT NULL DEFAULT '',
+                thoughts TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS book_excerpts (
+                id TEXT PRIMARY KEY NOT NULL,
+                book_id TEXT NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                page TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS books_updated_idx ON books(updated_at);
+            CREATE INDEX IF NOT EXISTS book_excerpts_book_idx ON book_excerpts(book_id);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
@@ -1280,6 +1583,46 @@ fn new_entry_id() -> String {
     format!("tren_{nanos:x}")
 }
 
+#[allow(dead_code)]
+fn new_book_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("book_{nanos:x}")
+}
+
+#[allow(dead_code)]
+fn new_book_excerpt_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("bexc_{nanos:x}")
+}
+
+fn row_to_book(row: &rusqlite::Row<'_>) -> rusqlite::Result<Book> {
+    Ok(Book {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        author: row.get(2)?,
+        cover_url: row.get(3)?,
+        intro: row.get(4)?,
+        status: row.get(5)?,
+        rating: row.get(6)?,
+        start_date: row.get(7)?,
+        end_date: row.get(8)?,
+        thoughts: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        excerpt_count: row.get(12)?,
+    })
+}
+
+fn row_to_book_excerpt(row: &rusqlite::Row<'_>) -> rusqlite::Result<BookExcerpt> {
+    Ok(BookExcerpt {
+        id: row.get(0)?,
+        book_id: row.get(1)?,
+        text: row.get(2)?,
+        page: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
 fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
     Ok(Track {
         id: row.get(0)?,
@@ -1410,6 +1753,10 @@ pub struct SyncSnapshot {
     pub projects: Vec<Project>,
     #[serde(default)]
     pub inbox_items: Vec<InboxItem>,
+    #[serde(default)]
+    pub books: Vec<Book>,
+    #[serde(default)]
+    pub book_excerpts: Vec<BookExcerpt>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
