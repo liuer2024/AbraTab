@@ -205,9 +205,14 @@ button:disabled {
 
 .app-shell {
   position: relative;
-  min-height: 100vh;
+  /* Lock to the viewport height so a tall right pane can't stretch the whole
+     grid (which used to push the left nav taller than the screen and scroll it).
+     Each panel scrolls internally instead. */
+  height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 206px 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   color: var(--ink);
   background: var(--app-bg);
@@ -445,7 +450,7 @@ label,
 
 .nav-heatmap {
   flex: 0 0 auto;
-  padding: 10px 14px;
+  padding: 10px 14px 15px;
   border-top: 1px solid var(--line-soft);
 }
 
@@ -491,9 +496,19 @@ label,
   color: var(--muted);
 }
 
-.heatmap-total {
-  color: var(--accent);
-  font-weight: 600;
+.heatmap-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.heatmap-weekdays span {
+  text-align: center;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--muted);
+  text-transform: uppercase;
 }
 
 .heatmap-grid {
@@ -507,37 +522,60 @@ label,
   min-height: 14px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--ink) 9%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  cursor: pointer;
+  /* Day number on empty days: kept faint so colour stays the main signal. */
+  color: color-mix(in srgb, var(--ink) 42%, transparent);
 }
 
 .heatmap-cell.empty {
   background: transparent;
+  cursor: default;
 }
 
+/* Lighter heat levels: dark number reads well on the pale fill. */
 .heatmap-cell[data-level="1"] {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: color-mix(in srgb, var(--ink) 80%, transparent);
 }
 
 .heatmap-cell[data-level="2"] {
   background: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--ink);
 }
 
+/* Darker heat levels: switch to a light number or it disappears on the fill. */
 .heatmap-cell[data-level="3"] {
   background: color-mix(in srgb, var(--accent) 74%, transparent);
+  color: #fff;
 }
 
 .heatmap-cell[data-level="4"] {
   background: var(--accent);
+  color: #fff;
 }
 
 .heatmap-cell.today {
-  outline: 1.5px solid var(--accent);
-  outline-offset: 1px;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  font-weight: 700;
+}
+
+/* On pale days, tint today's number with the accent so it reads as "today". */
+.heatmap-cell.today[data-level="0"],
+.heatmap-cell.today[data-level="1"] {
+  color: var(--accent);
 }
 
 .nav-foot {
   min-height: 36px;
   padding: 0 12px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -636,6 +674,11 @@ label,
 
 .add-button.starred-on {
   color: var(--star);
+}
+
+.add-button.archived-on {
+  color: var(--accent);
+  background: var(--hover);
 }
 
 .weeklog-star {
@@ -2608,20 +2651,15 @@ label,
   min-height: 0;
   width: 100%;
   resize: none;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border: 0;
+  outline: 0;
+  padding: 4px 2px;
   color: var(--ink);
-  background: var(--panel-2);
+  background: transparent;
   font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.6;
-  outline: 0;
   white-space: pre-wrap;
-}
-
-.inbox-text-editor:focus {
-  border-color: var(--accent-line);
 }
 
 .inbox-connect {
@@ -2732,6 +2770,10 @@ label,
   flex-direction: column;
   padding-left: 24px;
   margin-bottom: 18px;
+  /* Dot/connector anchor: a fixed offset (aligned to the first line of content),
+     not a height-relative percentage — so the line reaches the next dot whatever
+     this item's height is (e.g. when it contains an image). */
+  --timeline-dot-top: 11px;
 }
 
 .timeline-item:last-child {
@@ -2755,8 +2797,8 @@ label,
   content: "";
   position: absolute;
   left: 5px;
-  top: 50%;
-  bottom: calc(-18px - 50%);
+  top: var(--timeline-dot-top);
+  bottom: calc(-18px - var(--timeline-dot-top));
   width: 1.5px;
   background: var(--line);
 }
@@ -2768,7 +2810,7 @@ label,
 .timeline-dot {
   position: absolute;
   left: 0;
-  top: 50%;
+  top: var(--timeline-dot-top);
   transform: translateY(-50%);
   width: 11px;
   height: 11px;

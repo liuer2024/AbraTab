@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Activity,
+  Archive,
+  ArchiveRestore,
   CalendarDays,
   CalendarPlus,
   CalendarRange,
@@ -239,6 +241,7 @@ type Track = {
   title: string;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
   entry_count: number;
   last_entry_at: string | null;
 };
@@ -733,6 +736,13 @@ const translations = {
     entryDeleted: "已删除记录",
     entrySaved: "已更新记录",
     editEntry: "编辑记录",
+    trackArchive: "归档",
+    trackUnarchive: "取消归档",
+    trackArchived: "已归档主题",
+    trackUnarchived: "已取消归档",
+    showArchived: "查看已归档",
+    hideArchived: "返回",
+    noArchivedTracks: "还没有归档的主题。",
     wsProject: "项目坞",
     projectUnit: "个项目",
     newProject: "新建项目",
@@ -748,6 +758,7 @@ const translations = {
     projectDesc: "备注",
     projectDescPlaceholder: "记下项目用途、技术栈等…",
     projectOpenFolder: "打开文件夹",
+    projectOpenTerminal: "在终端打开",
     projectPickHint: "从左侧选择一个项目，或新建一个开始登记。",
     projectEmpty: "项目名称、目录或 Git 地址至少填一个",
     projectSaved: "已保存项目",
@@ -1019,6 +1030,13 @@ const translations = {
     entryDeleted: "Deleted entry",
     entrySaved: "Updated entry",
     editEntry: "Edit entry",
+    trackArchive: "Archive",
+    trackUnarchive: "Unarchive",
+    trackArchived: "Topic archived",
+    trackUnarchived: "Topic unarchived",
+    showArchived: "View archived",
+    hideArchived: "Back",
+    noArchivedTracks: "No archived topics yet.",
     wsProject: "Projects",
     projectUnit: "projects",
     newProject: "New project",
@@ -1034,6 +1052,7 @@ const translations = {
     projectDesc: "Notes",
     projectDescPlaceholder: "Note the purpose, tech stack, etc…",
     projectOpenFolder: "Open folder",
+    projectOpenTerminal: "Open in terminal",
     projectPickHint: "Select a project on the left, or create a new one.",
     projectEmpty: "Enter at least a name, directory, or Git URL",
     projectSaved: "Project saved",
@@ -1305,6 +1324,13 @@ const translations = {
     entryDeleted: "記録を削除しました",
     entrySaved: "記録を更新しました",
     editEntry: "記録を編集",
+    trackArchive: "アーカイブ",
+    trackUnarchive: "アーカイブ解除",
+    trackArchived: "トピックをアーカイブしました",
+    trackUnarchived: "アーカイブを解除しました",
+    showArchived: "アーカイブを表示",
+    hideArchived: "戻る",
+    noArchivedTracks: "アーカイブされたトピックはありません。",
     wsProject: "プロジェクト",
     projectUnit: "件",
     newProject: "新規プロジェクト",
@@ -1320,6 +1346,7 @@ const translations = {
     projectDesc: "メモ",
     projectDescPlaceholder: "用途や技術スタックなどをメモ…",
     projectOpenFolder: "フォルダを開く",
+    projectOpenTerminal: "ターミナルで開く",
     projectPickHint: "左側からプロジェクトを選ぶか、新規作成してください。",
     projectEmpty: "名前・ディレクトリ・Git URL のいずれかを入力してください",
     projectSaved: "プロジェクトを保存しました",
@@ -3027,19 +3054,21 @@ function JournalHeatmap({ locale }: { locale: Locale }) {
 
   const daysInMonth = last.getDate();
   const leading = (first.getDay() + 6) % 7; // Monday-first column offset
-  const cells: Array<{ date: string; count: number } | null> = [];
+  const cells: Array<{ date: string; day: number; count: number } | null> = [];
   for (let i = 0; i < leading; i += 1) cells.push(null);
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = `${year}-${pad(month + 1)}-${pad(day)}`;
-    cells.push({ date, count: counts[date] ?? 0 });
+    cells.push({ date, day, count: counts[date] ?? 0 });
   }
 
-  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
   const todayStr = ymd(now);
   const monthLabel = new Intl.DateTimeFormat(localeTags[locale], {
     year: "numeric",
     month: "long",
   }).format(base);
+  // Monday-first weekday labels, localized (Jan 1 2024 was a Monday).
+  const weekdayFmt = new Intl.DateTimeFormat(localeTags[locale], { weekday: "narrow" });
+  const weekdays = Array.from({ length: 7 }, (_, i) => weekdayFmt.format(new Date(2024, 0, 1 + i)));
 
   const level = (count: number) => {
     if (count <= 0) return 0;
@@ -3068,7 +3097,11 @@ function JournalHeatmap({ locale }: { locale: Locale }) {
             <ChevronRight size={13} />
           </button>
         </div>
-        <span className="heatmap-total">{total}</span>
+      </div>
+      <div className="heatmap-weekdays" aria-hidden="true">
+        {weekdays.map((label, index) => (
+          <span key={index}>{label}</span>
+        ))}
       </div>
       <div className="heatmap-grid">
         {cells.map((cell, index) =>
@@ -3078,7 +3111,9 @@ function JournalHeatmap({ locale }: { locale: Locale }) {
               className={`heatmap-cell ${cell.date === todayStr ? "today" : ""}`}
               data-level={level(cell.count)}
               title={`${cell.date} · ${cell.count}`}
-            />
+            >
+              {cell.day}
+            </div>
           ) : (
             <div key={`blank-${index}`} className="heatmap-cell empty" />
           ),
@@ -4098,6 +4133,7 @@ args = ["mcp"]`;
                       void saveCompose();
                     }
                   }}
+                  onPaste={(event) => void handleImagePaste(event)}
                   placeholder={text.inboxNewBody}
                   spellCheck={false}
                 />
@@ -4342,6 +4378,16 @@ function ProjectWorkspace({
     }
   }
 
+  async function openTerminal() {
+    const path = form?.path.trim();
+    if (!path) return;
+    try {
+      await invoke("open_terminal", { path });
+    } catch (error) {
+      showError(error);
+    }
+  }
+
   useEffect(() => {
     void (async () => {
       const rows = await refresh("");
@@ -4467,10 +4513,10 @@ function ProjectWorkspace({
             {form?.path.trim() ? (
               <button
                 className="icon-button"
-                title={text.projectOpenFolder}
-                onClick={() => void openFolder()}
+                title={text.projectOpenTerminal}
+                onClick={() => void openTerminal()}
               >
-                <FolderOpen size={16} />
+                <TerminalSquare size={16} />
               </button>
             ) : null}
             {form?.id ? (
@@ -4651,6 +4697,8 @@ function TrackWorkspace({
   const [editDraft, setEditDraft] = useState("");
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; track: Track } | null>(null);
   const composeRef = useRef<HTMLTextAreaElement | null>(null);
   const editRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -4727,8 +4775,11 @@ function TrackWorkspace({
     }).format(date);
   }
 
-  async function refreshTracks(nextQuery = query) {
-    const rows = await invoke<Track[]>("list_tracks", { query: nextQuery.trim() || null });
+  async function refreshTracks(nextQuery = query, archived = showArchived) {
+    const rows = await invoke<Track[]>("list_tracks", {
+      query: nextQuery.trim() || null,
+      archived,
+    });
     setTracks(rows);
     return rows;
   }
@@ -4838,6 +4889,46 @@ function TrackWorkspace({
     }
   }
 
+  // Archive/unarchive a topic. It leaves the current view either way, so re-pick
+  // the selection when the affected topic was the one open in the editor.
+  async function archiveTrack(track: Track, archived: boolean) {
+    setContextMenu(null);
+    try {
+      await invoke<Track>("set_track_archived", { id: track.id, archived });
+      const rows = await refreshTracks();
+      setStatus(archived ? text.trackArchived : text.trackUnarchived);
+      if (track.id === selectedId) {
+        if (rows.length) {
+          await selectTrack(rows[0]);
+        } else {
+          setSelectedId(null);
+          setEntries([]);
+          setTitleDraft("");
+        }
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function toggleArchivedView() {
+    const next = !showArchived;
+    setShowArchived(next);
+    setContextMenu(null);
+    try {
+      const rows = await refreshTracks(query, next);
+      if (rows.length) {
+        await selectTrack(rows[0]);
+      } else {
+        setSelectedId(null);
+        setEntries([]);
+        setTitleDraft("");
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
   return (
     <>
       <nav className="nav-panel">
@@ -4883,9 +4974,18 @@ function TrackWorkspace({
               placeholder={text.searchTracks}
             />
           </label>
-          <button className="add-button" onClick={() => void createTrack()} title={text.newTrack}>
-            <Plus size={17} />
+          <button
+            className={`add-button ${showArchived ? "archived-on" : ""}`}
+            onClick={() => void toggleArchivedView()}
+            title={showArchived ? text.hideArchived : text.showArchived}
+          >
+            {showArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
           </button>
+          {!showArchived ? (
+            <button className="add-button" onClick={() => void createTrack()} title={text.newTrack}>
+              <Plus size={17} />
+            </button>
+          ) : null}
         </div>
 
         <div className="snippet-list">
@@ -4894,6 +4994,10 @@ function TrackWorkspace({
               key={track.id}
               className={`snippet-item ${track.id === selectedId ? "selected" : ""}`}
               onClick={() => void selectTrack(track)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, track });
+              }}
             >
               <div className="snippet-title-row">
                 <span className="snippet-title">{track.title.trim() || text.untitledTrack}</span>
@@ -4907,7 +5011,9 @@ function TrackWorkspace({
               </div>
             </button>
           ))}
-          {tracks.length === 0 ? <div className="empty-list">{text.noTracks}</div> : null}
+          {tracks.length === 0 ? (
+            <div className="empty-list">{showArchived ? text.noArchivedTracks : text.noTracks}</div>
+          ) : null}
         </div>
       </section>
 
@@ -5102,6 +5208,32 @@ function TrackWorkspace({
         <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="" />
         </div>
+      ) : null}
+
+      {contextMenu ? (
+        <>
+          <div
+            className="context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div className="snippet-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            {contextMenu.track.archived_at ? (
+              <button onClick={() => void archiveTrack(contextMenu.track, false)}>
+                <ArchiveRestore size={13} />
+                {text.trackUnarchive}
+              </button>
+            ) : (
+              <button onClick={() => void archiveTrack(contextMenu.track, true)}>
+                <Archive size={13} />
+                {text.trackArchive}
+              </button>
+            )}
+          </div>
+        </>
       ) : null}
     </>
   );

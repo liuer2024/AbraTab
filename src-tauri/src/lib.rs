@@ -363,6 +363,32 @@ fn open_path(path: String) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Open a terminal with its working directory set to the given path.
+#[tauri::command]
+fn open_terminal(path: String) -> Result<(), AppError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!("path is empty").into());
+    }
+    #[cfg(target_os = "macos")]
+    Command::new("open")
+        .args(["-a", "Terminal", trimmed])
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("failed to open terminal at {trimmed}: {error}"))?;
+    #[cfg(target_os = "windows")]
+    Command::new("cmd")
+        .args(["/C", "start", "cmd", "/K", "cd", "/d", trimmed])
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("failed to open terminal at {trimmed}: {error}"))?;
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    Command::new("x-terminal-emulator")
+        .arg("--working-directory")
+        .arg(trimmed)
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("failed to open terminal at {trimmed}: {error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn current_week() -> Result<CurrentWeek, AppError> {
     let (week_key, week_start, week_end) = store::current_week_fields()?;
@@ -374,8 +400,13 @@ fn current_week() -> Result<CurrentWeek, AppError> {
 }
 
 #[tauri::command]
-fn list_tracks(query: Option<String>) -> Result<Vec<Track>, AppError> {
-    Ok(Store::open_default()?.list_tracks(query.as_deref())?)
+fn list_tracks(query: Option<String>, archived: Option<bool>) -> Result<Vec<Track>, AppError> {
+    Ok(Store::open_default()?.list_tracks(query.as_deref(), Some(archived.unwrap_or(false)))?)
+}
+
+#[tauri::command]
+fn set_track_archived(id: String, archived: bool) -> Result<Track, AppError> {
+    Ok(Store::open_default()?.set_track_archived(&id, archived)?)
 }
 
 #[tauri::command]
@@ -796,6 +827,7 @@ pub fn run() {
             save_project,
             delete_project,
             open_path,
+            open_terminal,
             list_inbox_items,
             create_inbox_item,
             update_inbox_item,
@@ -814,6 +846,7 @@ pub fn run() {
             list_tracks,
             save_track,
             delete_track,
+            set_track_archived,
             list_track_entries,
             add_track_entry,
             update_track_entry,

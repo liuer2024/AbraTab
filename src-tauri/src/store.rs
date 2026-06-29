@@ -576,20 +576,28 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// List tracks, optionally filtered by archived state.
+    /// `archived`: `Some(false)` → active only, `Some(true)` → archived only, `None` → all.
     #[allow(dead_code)]
-    pub fn list_tracks(&self, query: Option<&str>) -> Result<Vec<Track>> {
+    pub fn list_tracks(&self, query: Option<&str>, archived: Option<bool>) -> Result<Vec<Track>> {
         let select = r#"
-            SELECT t.id, t.title, t.created_at, t.updated_at,
+            SELECT t.id, t.title, t.created_at, t.updated_at, t.archived_at,
                 (SELECT COUNT(*) FROM track_entries e WHERE e.track_id = t.id) AS entry_count,
                 (SELECT MAX(created_at) FROM track_entries e WHERE e.track_id = t.id) AS last_entry_at
             FROM tracks t
         "#;
+        let archived_clause = match archived {
+            Some(true) => "t.archived_at IS NOT NULL",
+            Some(false) => "t.archived_at IS NULL",
+            None => "1 = 1",
+        };
         let tracks = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
             let pattern = format!("%{}%", query.trim().to_lowercase());
             let mut stmt = self.conn.prepare(&format!(
                 "{select}
-                WHERE lower(t.title) LIKE ?1
-                   OR EXISTS (SELECT 1 FROM track_entries e WHERE e.track_id = t.id AND lower(e.body) LIKE ?1)
+                WHERE {archived_clause}
+                  AND (lower(t.title) LIKE ?1
+                       OR EXISTS (SELECT 1 FROM track_entries e WHERE e.track_id = t.id AND lower(e.body) LIKE ?1))
                 ORDER BY t.updated_at DESC"
             ))?;
             let rows = stmt
@@ -597,9 +605,9 @@ impl Store {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         } else {
-            let mut stmt = self
-                .conn
-                .prepare(&format!("{select} ORDER BY t.updated_at DESC"))?;
+            let mut stmt = self.conn.prepare(&format!(
+                "{select} WHERE {archived_clause} ORDER BY t.updated_at DESC"
+            ))?;
             let rows = stmt
                 .query_map([], row_to_track)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -613,7 +621,7 @@ impl Store {
         self.conn
             .query_row(
                 r#"
-                SELECT t.id, t.title, t.created_at, t.updated_at,
+                SELECT t.id, t.title, t.created_at, t.updated_at, t.archived_at,
                     (SELECT COUNT(*) FROM track_entries e WHERE e.track_id = t.id) AS entry_count,
                     (SELECT MAX(created_at) FROM track_entries e WHERE e.track_id = t.id) AS last_entry_at
                 FROM tracks t
@@ -660,6 +668,16 @@ impl Store {
         self.conn
             .execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn set_track_archived(&self, id: &str, archived: bool) -> Result<Track> {
+        let archived_at = if archived { Some(now_string()) } else { None };
+        self.conn.execute(
+            "UPDATE tracks SET archived_at = ?2 WHERE id = ?1",
+            params![id, archived_at],
+        )?;
+        self.get_track(id)?.context("track not found")
     }
 
     #[allow(dead_code)]
@@ -726,14 +744,21 @@ impl Store {
     fn upsert_snapshot_track(&self, track: &Track) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO tracks (id, title, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4)
+            INSERT INTO tracks (id, title, created_at, updated_at, archived_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 created_at = excluded.created_at,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at
             "#,
-            params![track.id, track.title, track.created_at, track.updated_at],
+            params![
+                track.id,
+                track.title,
+                track.created_at,
+                track.updated_at,
+                track.archived_at
+            ],
         )?;
         Ok(())
     }
@@ -812,7 +837,7 @@ impl Store {
             exported_at: now_string(),
             snippets: self.list(None, true)?,
             week_logs: self.list_week_logs(None)?,
-            tracks: self.list_tracks(None)?,
+            tracks: self.list_tracks(None, None)?,
             track_entries: self.list_all_track_entries()?,
             projects: self.list_projects(None)?,
             inbox_items: self.list_inbox_items(None)?,
@@ -1080,6 +1105,7 @@ impl Store {
         self.add_column_if_missing("week_logs", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
         self.add_column_if_missing("projects", "tags", "TEXT NOT NULL DEFAULT '[]'")?;
         self.add_column_if_missing("inbox_items", "format", "TEXT NOT NULL DEFAULT 'markdown'")?;
+        self.add_column_if_missing("tracks", "archived_at", "TEXT")?;
 
         Ok(())
     }
@@ -1235,8 +1261,9 @@ fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         title: row.get(1)?,
         created_at: row.get(2)?,
         updated_at: row.get(3)?,
-        entry_count: row.get(4)?,
-        last_entry_at: row.get(5)?,
+        archived_at: row.get(4)?,
+        entry_count: row.get(5)?,
+        last_entry_at: row.get(6)?,
     })
 }
 

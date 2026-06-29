@@ -108,6 +108,8 @@ pub struct Track {
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]
+    pub archived_at: Option<String>,
+    #[serde(default)]
     pub entry_count: i64,
     #[serde(default)]
     pub last_entry_at: Option<String>,
