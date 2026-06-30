@@ -251,3 +251,22 @@ pub struct HabitCheckin {
     pub note: String,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeightEntry {
+    pub id: String,
+    pub day: String, // 'YYYY-MM-DD' 本地日期，一天一条
+    pub weight: f64, // 始终以 kg 存储，前端按单位换算显示
+    #[serde(default)]
+    pub note: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct WeightEntryInput {
+    pub day: String,
+    pub weight: f64,
+    pub note: Option<String>,
+}

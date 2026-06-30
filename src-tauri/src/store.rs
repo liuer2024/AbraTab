@@ -1,7 +1,7 @@
 use crate::models::{
     Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
     InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput,
+    TrackInput, WeekLog, WeekLogInput, WeightEntry,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1107,6 +1107,126 @@ impl Store {
     }
 
     #[allow(dead_code)]
+    // ----- Weight (体重) -----
+
+    /// Entries in `[start, end]` (either bound optional), oldest first so the
+    /// frontend can draw the trend line left-to-right.
+    #[allow(dead_code)]
+    pub fn list_weight_entries(
+        &self,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> Result<Vec<WeightEntry>> {
+        let base = "SELECT id, day, weight, note, created_at, updated_at FROM weight_entries";
+        let rows = match (start, end) {
+            (Some(s), Some(e)) => {
+                let mut stmt = self
+                    .conn
+                    .prepare(&format!("{base} WHERE day >= ?1 AND day <= ?2 ORDER BY day ASC"))?;
+                let r = stmt
+                    .query_map(params![s, e], row_to_weight_entry)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                r
+            }
+            (Some(s), None) => {
+                let mut stmt = self
+                    .conn
+                    .prepare(&format!("{base} WHERE day >= ?1 ORDER BY day ASC"))?;
+                let r = stmt
+                    .query_map(params![s], row_to_weight_entry)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                r
+            }
+            (None, Some(e)) => {
+                let mut stmt = self
+                    .conn
+                    .prepare(&format!("{base} WHERE day <= ?1 ORDER BY day ASC"))?;
+                let r = stmt
+                    .query_map(params![e], row_to_weight_entry)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                r
+            }
+            (None, None) => {
+                let mut stmt = self.conn.prepare(&format!("{base} ORDER BY day ASC"))?;
+                let r = stmt
+                    .query_map([], row_to_weight_entry)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                r
+            }
+        };
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    fn get_weight_entry(&self, day: &str) -> Result<Option<WeightEntry>> {
+        self.conn
+            .query_row(
+                "SELECT id, day, weight, note, created_at, updated_at FROM weight_entries WHERE day = ?1",
+                params![day],
+                row_to_weight_entry,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Upsert the entry for a day (one row per day). `weight` is always kg.
+    #[allow(dead_code)]
+    pub fn save_weight_entry(&self, day: &str, weight: f64, note: &str) -> Result<WeightEntry> {
+        let now = now_string();
+        let existing = self.get_weight_entry(day)?;
+        let id = existing
+            .as_ref()
+            .map(|entry| entry.id.clone())
+            .unwrap_or_else(new_weight_id);
+        let created_at = existing
+            .as_ref()
+            .map(|entry| entry.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        self.conn.execute(
+            r#"
+            INSERT INTO weight_entries (id, day, weight, note, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(day) DO UPDATE SET
+                weight = excluded.weight,
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            "#,
+            params![id, day, weight, note, created_at, now],
+        )?;
+        self.get_weight_entry(day)?
+            .context("weight entry was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_weight_entry(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM weight_entries WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_weight_entry(&self, entry: &WeightEntry) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO weight_entries (id, day, weight, note, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(day) DO UPDATE SET
+                weight = excluded.weight,
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                entry.id,
+                entry.day,
+                entry.weight,
+                entry.note,
+                entry.created_at,
+                entry.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     // ----- Habits (习惯打卡) -----
 
     const HABIT_COLS: &'static str = r#"
@@ -1475,7 +1595,7 @@ impl Store {
 
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 7,
+            schema: 8,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
@@ -1488,12 +1608,13 @@ impl Store {
             book_excerpts: self.list_all_book_excerpts()?,
             habits: self.list_all_habits()?,
             habit_checkins: self.list_all_habit_checkins()?,
+            weight_entries: self.list_weight_entries(None, None)?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 7 {
+        if snapshot.schema == 0 || snapshot.schema > 8 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -1622,6 +1743,22 @@ impl Store {
             } else {
                 self.upsert_snapshot_checkin(&checkin)?;
                 result.inserted += 1;
+            }
+        }
+        for entry in snapshot.weight_entries {
+            // Keyed by day: last edit wins so a corrected weight syncs across.
+            match self.get_weight_entry(&entry.day)? {
+                Some(existing) if existing.updated_at >= entry.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_weight_entry(&entry)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_weight_entry(&entry)?;
+                    result.inserted += 1;
+                }
             }
         }
         Ok(result)
@@ -1845,6 +1982,17 @@ impl Store {
             CREATE INDEX IF NOT EXISTS habits_sort_idx ON habits(sort_order);
             CREATE INDEX IF NOT EXISTS habit_checkins_habit_idx ON habit_checkins(habit_id);
             CREATE INDEX IF NOT EXISTS habit_checkins_day_idx ON habit_checkins(day);
+
+            CREATE TABLE IF NOT EXISTS weight_entries (
+                id TEXT PRIMARY KEY NOT NULL,
+                day TEXT NOT NULL UNIQUE,
+                weight REAL NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS weight_entries_day_idx ON weight_entries(day);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
@@ -2028,6 +2176,23 @@ fn new_habit_id() -> String {
 fn new_checkin_id() -> String {
     let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
     format!("hck_{nanos:x}")
+}
+
+#[allow(dead_code)]
+fn new_weight_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("wgt_{nanos:x}")
+}
+
+fn row_to_weight_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<WeightEntry> {
+    Ok(WeightEntry {
+        id: row.get(0)?,
+        day: row.get(1)?,
+        weight: row.get(2)?,
+        note: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
 }
 
 /// Parse a 'YYYY-MM-DD' string into a `Date` without the `time` parsing feature.
@@ -2271,6 +2436,8 @@ pub struct SyncSnapshot {
     pub habits: Vec<Habit>,
     #[serde(default)]
     pub habit_checkins: Vec<HabitCheckin>,
+    #[serde(default)]
+    pub weight_entries: Vec<WeightEntry>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

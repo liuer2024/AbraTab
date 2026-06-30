@@ -8,7 +8,7 @@ use qiniu::{QiniuStatus, UploadResult};
 use models::{
     Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
     InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput,
+    TrackInput, WeekLog, WeekLogInput, WeightEntry, WeightEntryInput,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -538,6 +538,29 @@ fn list_habit_checkins(
 }
 
 #[tauri::command]
+fn list_weight_entries(
+    start: Option<String>,
+    end: Option<String>,
+) -> Result<Vec<WeightEntry>, AppError> {
+    Ok(Store::open_default()?.list_weight_entries(start.as_deref(), end.as_deref())?)
+}
+
+#[tauri::command]
+fn save_weight_entry(input: WeightEntryInput) -> Result<WeightEntry, AppError> {
+    Ok(Store::open_default()?.save_weight_entry(
+        &input.day,
+        input.weight,
+        input.note.as_deref().unwrap_or(""),
+    )?)
+}
+
+#[tauri::command]
+fn delete_weight_entry(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_weight_entry(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn gitee_sync_status() -> Result<GiteeSyncStatus, AppError> {
     Ok(gitee_sync::load_status()?)
 }
@@ -962,6 +985,9 @@ pub fn run() {
             set_habit_archived,
             set_habit_checkin,
             list_habit_checkins,
+            list_weight_entries,
+            save_weight_entry,
+            delete_weight_entry,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,
