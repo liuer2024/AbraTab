@@ -1,6 +1,7 @@
 use crate::models::{
-    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, InboxItem, Project, ProjectInput,
-    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
+    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
+    TrackInput, WeekLog, WeekLogInput,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1106,9 +1107,375 @@ impl Store {
     }
 
     #[allow(dead_code)]
+    // ----- Habits (习惯打卡) -----
+
+    const HABIT_COLS: &'static str = r#"
+        h.id, h.name, h.emoji, h.color, h.kind, h.target, h.unit, h.schedule,
+        h.sort_order, h.created_at, h.updated_at, h.archived_at,
+        COALESCE((SELECT c.count FROM habit_checkins c WHERE c.habit_id = h.id AND c.day = ?1), 0) AS today_count,
+        (SELECT COUNT(*) FROM habit_checkins c WHERE c.habit_id = h.id AND c.count >= MAX(h.target, 1)) AS total_checkins
+    "#;
+
+    /// List habits with today's progress, total completed days and current
+    /// streak. `today` is the user's local 'YYYY-MM-DD' (supplied by the UI).
+    /// `archived`: `Some(false)` active, `Some(true)` archived, `None` all.
+    #[allow(dead_code)]
+    pub fn list_habits(
+        &self,
+        query: Option<&str>,
+        archived: Option<bool>,
+        today: &str,
+    ) -> Result<Vec<Habit>> {
+        let cols = Self::HABIT_COLS;
+        let archived_clause = match archived {
+            Some(true) => "h.archived_at IS NOT NULL",
+            Some(false) => "h.archived_at IS NULL",
+            None => "1 = 1",
+        };
+        let mut habits = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+            let pattern = format!("%{}%", query.trim().to_lowercase());
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT {cols} FROM habits h
+                 WHERE {archived_clause} AND lower(h.name) LIKE ?2
+                 ORDER BY h.sort_order ASC, h.created_at ASC"
+            ))?;
+            let rows = stmt
+                .query_map(params![today, pattern], row_to_habit)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        } else {
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT {cols} FROM habits h
+                 WHERE {archived_clause}
+                 ORDER BY h.sort_order ASC, h.created_at ASC"
+            ))?;
+            let rows = stmt
+                .query_map(params![today], row_to_habit)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        for habit in &mut habits {
+            self.fill_habit_stats(habit, today)?;
+        }
+        Ok(habits)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_habit(&self, id: &str, today: &str) -> Result<Option<Habit>> {
+        let cols = Self::HABIT_COLS;
+        let habit = self
+            .conn
+            .query_row(
+                &format!("SELECT {cols} FROM habits h WHERE h.id = ?2"),
+                params![today, id],
+                row_to_habit,
+            )
+            .optional()?;
+        match habit {
+            Some(mut habit) => {
+                self.fill_habit_stats(&mut habit, today)?;
+                Ok(Some(habit))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Fill the derived `done_today` / `current_streak` fields.
+    fn fill_habit_stats(&self, habit: &mut Habit, today: &str) -> Result<()> {
+        let target_eff = habit.target.max(1);
+        habit.done_today = habit.today_count >= target_eff;
+        let days = self.habit_completed_days(&habit.id, target_eff)?;
+        habit.current_streak = compute_current_streak(&days, today);
+        Ok(())
+    }
+
+    /// Set of days (YYYY-MM-DD) on which the habit reached its target.
+    fn habit_completed_days(
+        &self,
+        habit_id: &str,
+        target_eff: i64,
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT day FROM habit_checkins WHERE habit_id = ?1 AND count >= ?2")?;
+        let days = stmt
+            .query_map(params![habit_id, target_eff], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;
+        Ok(days)
+    }
+
+    fn next_habit_sort_order(&self) -> Result<i64> {
+        let next: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM habits",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(next)
+    }
+
+    #[allow(dead_code)]
+    pub fn save_habit(&self, input: HabitInput, today: &str) -> Result<Habit> {
+        let now = now_string();
+        let id = input
+            .id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(new_habit_id);
+        let existing = self.get_habit(&id, today)?;
+        let created_at = existing
+            .as_ref()
+            .map(|habit| habit.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let sort_order = match input.sort_order {
+            Some(value) => value,
+            None => existing
+                .as_ref()
+                .map(|habit| habit.sort_order)
+                .map(Ok)
+                .unwrap_or_else(|| self.next_habit_sort_order())?,
+        };
+
+        self.conn.execute(
+            r#"
+            INSERT INTO habits
+                (id, name, emoji, color, kind, target, unit, schedule, sort_order, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                emoji = excluded.emoji,
+                color = excluded.color,
+                kind = excluded.kind,
+                target = excluded.target,
+                unit = excluded.unit,
+                schedule = excluded.schedule,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                id,
+                input.name.unwrap_or_default(),
+                input.emoji.unwrap_or_default(),
+                input.color.unwrap_or_default(),
+                input.kind.unwrap_or_else(|| "check".to_string()),
+                input.target.unwrap_or(1),
+                input.unit.unwrap_or_default(),
+                input.schedule.unwrap_or_else(|| "daily".to_string()),
+                sort_order,
+                created_at,
+                now,
+            ],
+        )?;
+
+        self.get_habit(&id, today)?.context("habit was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_habit(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM habit_checkins WHERE habit_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM habits WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn set_habit_archived(&self, id: &str, archived: bool, today: &str) -> Result<Habit> {
+        let archived_at = if archived { Some(now_string()) } else { None };
+        self.conn.execute(
+            "UPDATE habits SET archived_at = ?2 WHERE id = ?1",
+            params![id, archived_at],
+        )?;
+        self.get_habit(id, today)?.context("habit not found")
+    }
+
+    /// Record (or clear) a day's check-in. `count <= 0` removes the row, so the
+    /// same command toggles a check-type habit off and sets a count-type value.
+    #[allow(dead_code)]
+    pub fn set_checkin(
+        &self,
+        habit_id: &str,
+        day: &str,
+        count: i64,
+        note: &str,
+    ) -> Result<Option<HabitCheckin>> {
+        if count <= 0 {
+            self.conn.execute(
+                "DELETE FROM habit_checkins WHERE habit_id = ?1 AND day = ?2",
+                params![habit_id, day],
+            )?;
+            self.touch_habit(habit_id)?;
+            return Ok(None);
+        }
+        let now = now_string();
+        self.conn.execute(
+            r#"
+            INSERT INTO habit_checkins (id, habit_id, day, count, note, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(habit_id, day) DO UPDATE SET
+                count = excluded.count,
+                note = excluded.note
+            "#,
+            params![new_checkin_id(), habit_id, day, count, note, now],
+        )?;
+        self.touch_habit(habit_id)?;
+        self.get_checkin(habit_id, day)
+    }
+
+    fn touch_habit(&self, id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE habits SET updated_at = ?2 WHERE id = ?1",
+            params![id, now_string()],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn get_checkin(&self, habit_id: &str, day: &str) -> Result<Option<HabitCheckin>> {
+        self.conn
+            .query_row(
+                "SELECT id, habit_id, day, count, note, created_at FROM habit_checkins WHERE habit_id = ?1 AND day = ?2",
+                params![habit_id, day],
+                row_to_habit_checkin,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    pub fn list_habit_checkins(
+        &self,
+        habit_id: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> Result<Vec<HabitCheckin>> {
+        let mut sql = String::from(
+            "SELECT id, habit_id, day, count, note, created_at FROM habit_checkins WHERE habit_id = ?1",
+        );
+        if start.is_some() {
+            sql.push_str(" AND day >= ?2");
+        }
+        if end.is_some() {
+            sql.push_str(" AND day <= ?3");
+        }
+        sql.push_str(" ORDER BY day DESC");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = match (start, end) {
+            (Some(s), Some(e)) => stmt
+                .query_map(params![habit_id, s, e], row_to_habit_checkin)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (Some(s), None) => stmt
+                .query_map(params![habit_id, s], row_to_habit_checkin)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (None, None) => stmt
+                .query_map(params![habit_id], row_to_habit_checkin)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (None, Some(e)) => {
+                // No start but an end → bind end as ?2 against the rebuilt SQL.
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, habit_id, day, count, note, created_at FROM habit_checkins
+                     WHERE habit_id = ?1 AND day <= ?2 ORDER BY day DESC",
+                )?;
+                let rows = stmt
+                    .query_map(params![habit_id, e], row_to_habit_checkin)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            }
+        };
+        Ok(rows)
+    }
+
+    /// Raw habits for the sync snapshot (no per-day aggregates needed).
+    #[allow(dead_code)]
+    fn list_all_habits(&self) -> Result<Vec<Habit>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, emoji, color, kind, target, unit, schedule, sort_order,
+                    created_at, updated_at, archived_at, 0, 0
+             FROM habits ORDER BY sort_order ASC",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_habit)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    fn list_all_habit_checkins(&self) -> Result<Vec<HabitCheckin>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, habit_id, day, count, note, created_at FROM habit_checkins ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_habit_checkin)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_habit(&self, habit: &Habit) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO habits
+                (id, name, emoji, color, kind, target, unit, schedule, sort_order, created_at, updated_at, archived_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                emoji = excluded.emoji,
+                color = excluded.color,
+                kind = excluded.kind,
+                target = excluded.target,
+                unit = excluded.unit,
+                schedule = excluded.schedule,
+                sort_order = excluded.sort_order,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at
+            "#,
+            params![
+                habit.id,
+                habit.name,
+                habit.emoji,
+                habit.color,
+                habit.kind,
+                habit.target,
+                habit.unit,
+                habit.schedule,
+                habit.sort_order,
+                habit.created_at,
+                habit.updated_at,
+                habit.archived_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_checkin(&self, checkin: &HabitCheckin) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO habit_checkins (id, habit_id, day, count, note, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+                habit_id = excluded.habit_id,
+                day = excluded.day,
+                count = excluded.count,
+                note = excluded.note,
+                created_at = excluded.created_at
+            "#,
+            params![
+                checkin.id,
+                checkin.habit_id,
+                checkin.day,
+                checkin.count,
+                checkin.note,
+                checkin.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 6,
+            schema: 7,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
@@ -1119,12 +1486,14 @@ impl Store {
             inbox_items: self.list_inbox_items(None, None)?,
             books: self.list_books(None, None)?,
             book_excerpts: self.list_all_book_excerpts()?,
+            habits: self.list_all_habits()?,
+            habit_checkins: self.list_all_habit_checkins()?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 6 {
+        if snapshot.schema == 0 || snapshot.schema > 7 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -1227,6 +1596,31 @@ impl Store {
                 result.skipped += 1;
             } else {
                 self.upsert_snapshot_book_excerpt(&excerpt)?;
+                result.inserted += 1;
+            }
+        }
+        for habit in snapshot.habits {
+            match self.get_habit(&habit.id, "")? {
+                Some(existing) if existing.updated_at >= habit.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_habit(&habit)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_habit(&habit)?;
+                    result.inserted += 1;
+                }
+            }
+        }
+        for checkin in snapshot.habit_checkins {
+            // Keyed by (habit_id, day): if that day already has a check-in it's
+            // the same record, so keep ours and skip rather than hit the UNIQUE.
+            if self.get_checkin(&checkin.habit_id, &checkin.day)?.is_some() {
+                result.skipped += 1;
+            } else {
+                self.upsert_snapshot_checkin(&checkin)?;
                 result.inserted += 1;
             }
         }
@@ -1422,6 +1816,35 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS books_updated_idx ON books(updated_at);
             CREATE INDEX IF NOT EXISTS book_excerpts_book_idx ON book_excerpts(book_id);
+
+            CREATE TABLE IF NOT EXISTS habits (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                emoji TEXT NOT NULL DEFAULT '',
+                color TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'check',
+                target INTEGER NOT NULL DEFAULT 1,
+                unit TEXT NOT NULL DEFAULT '',
+                schedule TEXT NOT NULL DEFAULT 'daily',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS habit_checkins (
+                id TEXT PRIMARY KEY NOT NULL,
+                habit_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 1,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(habit_id, day)
+            );
+
+            CREATE INDEX IF NOT EXISTS habits_sort_idx ON habits(sort_order);
+            CREATE INDEX IF NOT EXISTS habit_checkins_habit_idx ON habit_checkins(habit_id);
+            CREATE INDEX IF NOT EXISTS habit_checkins_day_idx ON habit_checkins(day);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
@@ -1595,6 +2018,93 @@ fn new_book_excerpt_id() -> String {
     format!("bexc_{nanos:x}")
 }
 
+#[allow(dead_code)]
+fn new_habit_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("hab_{nanos:x}")
+}
+
+#[allow(dead_code)]
+fn new_checkin_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("hck_{nanos:x}")
+}
+
+/// Parse a 'YYYY-MM-DD' string into a `Date` without the `time` parsing feature.
+/// Habit days are local dates supplied by the frontend.
+fn parse_ymd(s: &str) -> Option<Date> {
+    let mut parts = s.split('-');
+    let y: i32 = parts.next()?.trim().parse().ok()?;
+    let m: u8 = parts.next()?.trim().parse().ok()?;
+    let d: u8 = parts.next()?.trim().parse().ok()?;
+    let month = time::Month::try_from(m).ok()?;
+    Date::from_calendar_date(y, month, d).ok()
+}
+
+/// Consecutive completed days ending at (or, if today isn't done yet, just
+/// before) `today`. An unfinished today doesn't reset a live streak.
+fn compute_current_streak(days: &std::collections::HashSet<String>, today: &str) -> i64 {
+    let fmt = format_description!("[year]-[month]-[day]");
+    let mut cursor = match parse_ymd(today) {
+        Some(d) => d,
+        None => return 0,
+    };
+    if !days.contains(today) {
+        cursor = match cursor.previous_day() {
+            Some(d) => d,
+            None => return 0,
+        };
+    }
+    let mut streak = 0i64;
+    loop {
+        let key = match cursor.format(&fmt) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        if !days.contains(&key) {
+            break;
+        }
+        streak += 1;
+        cursor = match cursor.previous_day() {
+            Some(d) => d,
+            None => break,
+        };
+    }
+    streak
+}
+
+fn row_to_habit(row: &rusqlite::Row<'_>) -> rusqlite::Result<Habit> {
+    Ok(Habit {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        emoji: row.get(2)?,
+        color: row.get(3)?,
+        kind: row.get(4)?,
+        target: row.get(5)?,
+        unit: row.get(6)?,
+        schedule: row.get(7)?,
+        sort_order: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        archived_at: row.get(11)?,
+        today_count: row.get(12)?,
+        total_checkins: row.get(13)?,
+        done_today: false,
+        current_streak: 0,
+    })
+}
+
+fn row_to_habit_checkin(row: &rusqlite::Row<'_>) -> rusqlite::Result<HabitCheckin> {
+    Ok(HabitCheckin {
+        id: row.get(0)?,
+        habit_id: row.get(1)?,
+        day: row.get(2)?,
+        count: row.get(3)?,
+        note: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
 fn row_to_book(row: &rusqlite::Row<'_>) -> rusqlite::Result<Book> {
     Ok(Book {
         id: row.get(0)?,
@@ -1757,6 +2267,10 @@ pub struct SyncSnapshot {
     pub books: Vec<Book>,
     #[serde(default)]
     pub book_excerpts: Vec<BookExcerpt>,
+    #[serde(default)]
+    pub habits: Vec<Habit>,
+    #[serde(default)]
+    pub habit_checkins: Vec<HabitCheckin>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

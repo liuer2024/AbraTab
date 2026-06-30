@@ -6,8 +6,9 @@ mod store;
 use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSyncStatus};
 use qiniu::{QiniuStatus, UploadResult};
 use models::{
-    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, InboxItem, Project, ProjectInput,
-    Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput, TrackInput, WeekLog, WeekLogInput,
+    Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
+    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
+    TrackInput, WeekLog, WeekLogInput,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -493,6 +494,50 @@ fn delete_book_excerpt(id: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn list_habits(
+    query: Option<String>,
+    archived: Option<bool>,
+    today: String,
+) -> Result<Vec<Habit>, AppError> {
+    Ok(Store::open_default()?.list_habits(query.as_deref(), archived, &today)?)
+}
+
+#[tauri::command]
+fn save_habit(input: HabitInput, today: String) -> Result<Habit, AppError> {
+    Ok(Store::open_default()?.save_habit(input, &today)?)
+}
+
+#[tauri::command]
+fn delete_habit(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_habit(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_habit_archived(id: String, archived: bool, today: String) -> Result<Habit, AppError> {
+    Ok(Store::open_default()?.set_habit_archived(&id, archived, &today)?)
+}
+
+#[tauri::command]
+fn set_habit_checkin(
+    habit_id: String,
+    day: String,
+    count: i64,
+    note: Option<String>,
+) -> Result<Option<HabitCheckin>, AppError> {
+    Ok(Store::open_default()?.set_checkin(&habit_id, &day, count, note.as_deref().unwrap_or(""))?)
+}
+
+#[tauri::command]
+fn list_habit_checkins(
+    habit_id: String,
+    start: Option<String>,
+    end: Option<String>,
+) -> Result<Vec<HabitCheckin>, AppError> {
+    Ok(Store::open_default()?.list_habit_checkins(&habit_id, start.as_deref(), end.as_deref())?)
+}
+
+#[tauri::command]
 fn gitee_sync_status() -> Result<GiteeSyncStatus, AppError> {
     Ok(gitee_sync::load_status()?)
 }
@@ -911,6 +956,12 @@ pub fn run() {
             add_book_excerpt,
             update_book_excerpt,
             delete_book_excerpt,
+            list_habits,
+            save_habit,
+            delete_habit,
+            set_habit_archived,
+            set_habit_checkin,
+            list_habit_checkins,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,

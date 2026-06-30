@@ -193,3 +193,61 @@ pub struct BookExcerptInput {
     #[serde(default)]
     pub page: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Habit {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub emoji: String,
+    #[serde(default)]
+    pub color: String,
+    pub kind: String, // 'check' 纯打卡 | 'count' 计量
+    #[serde(default)]
+    pub target: i64, // count 型每日目标，check 型固定 1
+    #[serde(default)]
+    pub unit: String, // count 型单位，如「杯」「公里」
+    #[serde(default)]
+    pub schedule: String, // 频率规则，M1 固定 'daily'，预留扩展
+    #[serde(default)]
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub archived_at: Option<String>,
+    // 聚合字段（仅 list/get 返回，import 时给默认值）。
+    #[serde(default)]
+    pub done_today: bool,
+    #[serde(default)]
+    pub today_count: i64,
+    #[serde(default)]
+    pub current_streak: i64,
+    #[serde(default)]
+    pub total_checkins: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct HabitInput {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub emoji: Option<String>,
+    pub color: Option<String>,
+    pub kind: Option<String>,
+    pub target: Option<i64>,
+    pub unit: Option<String>,
+    pub schedule: Option<String>,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HabitCheckin {
+    pub id: String,
+    pub habit_id: String,
+    pub day: String, // 'YYYY-MM-DD' 本地日期
+    #[serde(default)]
+    pub count: i64,
+    #[serde(default)]
+    pub note: String,
+    pub created_at: String,
+}
