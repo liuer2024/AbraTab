@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>习惯详情 · 方案 A 圆环 + 节奏条</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#1d1d1f; --soft:#5a5a5c; --muted:#8e8e93; --faint:#b6b6bb;
+    --line:#e7e8ec; --panel:#ffffff; --bg:#eceef1;
+    --accent:#3d6cb0; --accent-2:#37b6c9; --track:#e9ebef;
+    --flame:#d2722e;
+    --num:"Sora", ui-rounded, -apple-system, system-ui, sans-serif;
+    --ui:-apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:var(--ui);color:var(--ink);
+    min-height:100vh;display:grid;place-items:center;padding:40px}
+  .caption{position:fixed;top:16px;left:20px;font-size:12px;color:var(--muted)}
+  .caption b{color:var(--ink);font-weight:600}
+
+  .panel{width:600px;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;padding:26px 28px 30px;
+    box-shadow:0 24px 60px -36px rgba(0,0,0,.5)}
+
+  .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+  .title{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:600;letter-spacing:-.01em}
+  .title .emoji{font-size:26px}
+  .tools{display:flex;gap:4px}
+  .tools button{width:30px;height:30px;border:0;border-radius:8px;background:transparent;
+    color:var(--muted);cursor:pointer;font-size:14px}
+  .tools button:hover{background:#f0f1f4;color:var(--ink)}
+
+  .hero{display:flex;align-items:center;gap:30px;margin-bottom:26px}
+
+  .ring{position:relative;width:158px;height:158px;border-radius:50%;flex:0 0 auto;
+    background:conic-gradient(from -90deg,var(--accent) 0,var(--accent-2) calc(var(--p)*1%),var(--track) 0);
+    display:grid;place-items:center}
+  .ring::after{content:"";position:absolute;inset:13px;border-radius:50%;background:var(--panel);
+    box-shadow:inset 0 1px 4px rgba(0,0,0,.05)}
+  .ring-in{position:relative;text-align:center;line-height:1}
+  .ring-in .v{font-family:var(--num);font-size:40px;font-weight:700;letter-spacing:-.02em}
+  .ring-in .v small{font-size:18px;font-weight:500;color:var(--faint)}
+  .ring-in .u{margin-top:6px;font-size:12px;color:var(--muted)}
+
+  .hero-r{flex:1;min-width:0}
+  .counter{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+  .counter button{width:42px;height:42px;border:1px solid var(--line);border-radius:13px;
+    background:#fbfcfd;color:var(--soft);font-size:20px;cursor:pointer;display:grid;place-items:center}
+  .counter button:hover{border-color:var(--accent);color:var(--accent)}
+  .counter .lead{font-size:13px;color:var(--muted)}
+  .counter .lead b{display:block;font-family:var(--num);font-size:15px;font-weight:600;color:var(--ink)}
+  .counter .grow{flex:1}
+  .counter .cta{width:auto;padding:0 18px;gap:7px;background:var(--accent);border-color:var(--accent);
+    color:#fff;font-size:13px;font-weight:500;font-family:var(--ui)}
+  .counter .cta:hover{filter:brightness(1.06)}
+
+  .stats{display:flex;gap:0}
+  .stat{flex:1;padding:2px 4px}
+  .stat + .stat{border-left:1px solid var(--line);padding-left:16px}
+  .stat .n{font-family:var(--num);font-size:22px;font-weight:600;letter-spacing:-.02em;
+    display:flex;align-items:baseline;gap:5px}
+  .stat .n .flame{font-size:14px}
+  .stat .k{margin-top:3px;font-size:11px;color:var(--muted)}
+
+  .rhythm{margin-top:4px;border-top:1px solid var(--line);padding-top:20px}
+  .rhythm-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;
+    font-size:12px;color:var(--muted)}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:46px}
+  .bar{flex:1;border-radius:3px 3px 2px 2px;background:var(--track);min-height:4px;position:relative}
+  .bar i{position:absolute;left:0;right:0;bottom:0;border-radius:3px 3px 2px 2px;
+    background:linear-gradient(var(--accent-2),var(--accent))}
+  .bar.today{outline:2px solid var(--accent);outline-offset:1px}
+  .legend{margin-top:9px;font-size:10.5px;color:var(--faint);text-align:right}
+</style>
+</head>
+<body>
+<div class="caption">习惯详情 · 方案 <b>A — 圆环进度 + 30 天节奏条</b>　（核心：今天的完成度做成主视觉圆环，月历换成更密的节奏条）</div>
+
+<section class="panel">
+  <div class="head">
+    <div class="title"><span class="emoji">💧</span> 每天喝水</div>
+    <div class="tools"><button>✏️</button><button>🗄️</button><button>🗑️</button></div>
+  </div>
+
+  <div class="hero">
+    <div class="ring" style="--p:62.5">
+      <div class="ring-in">
+        <div class="v">5<small>/8</small></div>
+        <div class="u">今天 · 杯</div>
+      </div>
+    </div>
+    <div class="hero-r">
+      <div class="counter">
+        <button>−</button>
+        <div class="lead">今日已喝<b>5 杯</b></div>
+        <span class="grow"></span>
+        <button class="cta">＋ 喝一杯</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="n">12<span class="flame">🔥</span></div><div class="k">连续 · 天</div></div>
+        <div class="stat"><div class="n">86</div><div class="k">累计 · 天</div></div>
+        <div class="stat"><div class="n">18<span style="font-size:12px;color:var(--faint)">/30</span></div><div class="k">本月达标</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rhythm">
+    <div class="rhythm-h"><span>最近 30 天</span><span>每根 = 当天完成度</span></div>
+    <div class="bars" id="bars"></div>
+    <div class="legend">达标的日子满格，未达标按当天杯数高低显示</div>
+  </div>
+</section>
+
+<script>
+  // 0..1 完成度（当天杯数/目标），最后一根是今天
+  const data = [1,1,.6,1,1,0,1,1,.4,1,1,1,0,1,1,.75,1,1,1,.3,1,0,1,1,1,.5,1,1,1,.625];
+  const bars = document.getElementById('bars');
+  data.forEach((v,i)=>{
+    const b=document.createElement('div'); b.className='bar'+(i===data.length-1?' today':'');
+    const h=Math.max(8,Math.round(v*100));
+    b.innerHTML=`<i style="height:${h}%"></i>`;
+    bars.appendChild(b);
+  });
+</script>
+</body>
+</html>

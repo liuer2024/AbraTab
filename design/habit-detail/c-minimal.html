@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>习惯详情 · 方案 C 极简数据</title>
+<style>
+  :root{
+    --ink:#16171a; --soft:#5b5e66; --muted:#9aa0a8; --faint:#c7ccd2;
+    --line:#ededf0; --line-2:#f4f5f7; --panel:#fff; --bg:#f3f4f6;
+    --accent:#2f6df0; --cell:#eceef1;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono",Menlo,monospace;
+    --ui:-apple-system,BlinkMacSystemFont,"PingFang SC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:var(--ui);color:var(--ink);
+    min-height:100vh;display:grid;place-items:center;padding:40px}
+  .caption{position:fixed;top:16px;left:20px;font-size:12px;color:var(--muted)}
+  .caption b{color:var(--ink);font-weight:600}
+
+  .panel{width:600px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:30px 32px}
+
+  .head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .title{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .title .e{font-size:20px}
+  .today{display:flex;align-items:center;gap:8px}
+  .today .val{font-family:var(--mono);font-size:13px;color:var(--soft);letter-spacing:-.02em}
+  .today .val b{color:var(--ink);font-weight:600}
+  .today button{width:26px;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+    color:var(--soft);cursor:pointer;font-size:14px;line-height:1}
+  .today button:hover{border-color:var(--accent);color:var(--accent)}
+
+  .hr{height:1px;background:var(--line);margin:22px 0}
+
+  .metrics{display:flex;align-items:center;gap:0}
+  .metric{padding-right:26px}
+  .metric + .metric{padding-left:26px;border-left:1px solid var(--line-2)}
+  .metric .n{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:-.03em}
+  .metric .k{margin-top:2px;font-size:11px;color:var(--muted)}
+  .metric.rate{flex:1;padding-right:0}
+  .rate-top{display:flex;justify-content:space-between;align-items:baseline}
+  .rate-top .n{font-size:14px}
+  .rate-top .k{margin:0}
+  .bar{margin-top:8px;height:6px;border-radius:3px;background:var(--cell);overflow:hidden}
+  .bar i{display:block;height:100%;width:60%;border-radius:3px;background:var(--accent)}
+
+  .grid-wrap{margin-top:8px}
+  .grid-h{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);
+    margin:0 2px 8px}
+  .hm{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);
+    gap:4px;justify-content:start}
+  .d{width:13px;height:13px;border-radius:3px;background:var(--cell)}
+  .d[data-l="1"]{background:color-mix(in srgb,var(--accent) 28%,#fff)}
+  .d[data-l="2"]{background:color-mix(in srgb,var(--accent) 52%,#fff)}
+  .d[data-l="3"]{background:color-mix(in srgb,var(--accent) 76%,#fff)}
+  .d[data-l="4"]{background:var(--accent)}
+  .d.today{outline:1.5px solid var(--accent);outline-offset:1px}
+  .legend{display:flex;align-items:center;gap:6px;justify-content:flex-end;
+    margin-top:12px;font-size:10.5px;color:var(--muted)}
+  .legend .d{width:11px;height:11px}
+</style>
+</head>
+<body>
+<div class="caption">习惯详情 · 方案 <b>C — 极简数据（GitHub 贡献图）</b>　（核心：去卡片化，细线 + 等宽数字 + 紧凑三月热力图）</div>
+
+<section class="panel">
+  <div class="head">
+    <div class="title"><span class="e">💧</span> 每天喝水</div>
+    <div class="today">
+      <span class="val">今天 <b>5</b>/8 杯</span>
+      <button>−</button><button>＋</button>
+    </div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="metrics">
+    <div class="metric"><div class="n">12</div><div class="k">连续 · 天</div></div>
+    <div class="metric"><div class="n">86</div><div class="k">累计 · 天</div></div>
+    <div class="metric rate">
+      <div class="rate-top"><span class="n">本月达标率</span><span class="k">18 / 30 天</span></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="grid-wrap">
+    <div class="grid-h"><span>近 3 个月</span><span>4月 — 6月</span></div>
+    <div class="hm" id="hm"></div>
+    <div class="legend">少 <span class="d" data-l="0"></span><span class="d" data-l="1"></span><span class="d" data-l="2"></span><span class="d" data-l="3"></span><span class="d" data-l="4"></span> 多</div>
+  </div>
+</section>
+
+<script>
+  // 13 周 × 7 天，确定性伪随机的完成强度，最后一格是今天
+  const hm = document.getElementById('hm');
+  const N = 13*7;
+  for(let i=0;i<N;i++){
+    const d=document.createElement('div'); d.className='d';
+    const seed=(i*73+17)%100;
+    let l = seed<22?0 : seed<38?1 : seed<58?2 : seed<82?4 : 3;
+    if(i>=N-6 && i<N-1) l=Math.max(l,2);
+    d.dataset.l=l;
+    if(i===N-1){ d.dataset.l=3; d.classList.add('today'); }
+    hm.appendChild(d);
+  }
+</script>
+</body>
+</html>

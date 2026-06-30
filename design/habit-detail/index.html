@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>习惯详情页 · 设计方案对比</title>
+<style>
+  :root{
+    --ink:#1d1d1f; --soft:#5a5a5c; --muted:#8e8e93; --line:#e3e5e9; --bg:#e7e9ec; --accent:#3d6cb0;
+    --ui:-apple-system,BlinkMacSystemFont,"PingFang SC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:var(--ui);color:var(--ink);padding:36px 28px 60px}
+  header{max-width:1180px;margin:0 auto 26px}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
+  header p{margin:0;color:var(--muted);font-size:13px;line-height:1.6}
+  .grid{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    box-shadow:0 14px 40px -30px rgba(0,0,0,.5)}
+  .card-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:16px 18px 12px}
+  .card-h .t{font-size:15px;font-weight:600}
+  .card-h .t b{color:var(--accent);font-weight:600}
+  .card-h a{font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap}
+  .card-h a:hover{text-decoration:underline}
+  .desc{padding:0 18px 14px;color:var(--soft);font-size:12.5px;line-height:1.6}
+  .frame{position:relative;height:300px;border-top:1px solid var(--line);background:#f0f1f4;overflow:hidden}
+  .frame iframe{position:absolute;top:0;left:50%;width:680px;height:600px;border:0;
+    transform:translateX(-50%) scale(.62);transform-origin:top center}
+  .tip{max-width:1180px;margin:26px auto 0;color:var(--muted);font-size:12px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>习惯详情页 · 4 款设计方案</h1>
+  <p>同一组示例数据（💧每天喝水 5/8 杯 · 连续 12 天 · 本月 18 天）下的四种视觉方向，点右上角「打开」看完整效果。当前线上版是“双数字卡片 + 月历网格”，这四款是替代方向。</p>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-h"><span class="t">A · <b>圆环进度 + 节奏条</b></span><a href="a-ring.html" target="_blank">打开 ↗</a></div>
+    <div class="desc">今天的完成度做成主视觉圆环，月历换成更密的「最近 30 天」节奏条。适合计量型，进度感强。</div>
+    <div class="frame"><iframe src="a-ring.html" scrolling="no" title="方案 A"></iframe></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="t">B · <b>日课印章（黄历感）</b></span><a href="b-almanac.html" target="_blank">打开 ↗</a></div>
+    <div class="desc">把“打卡”还原成盖印章：纸纹背景、衬线标题、朱砂印盖在完成的日子上。最有性格、也最冒险的一版。</div>
+    <div class="frame"><iframe src="b-almanac.html" scrolling="no" title="方案 B"></iframe></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="t">C · <b>极简数据</b></span><a href="c-minimal.html" target="_blank">打开 ↗</a></div>
+    <div class="desc">去卡片化：细线分隔、等宽数字、达标率细条，配 GitHub 风格的近三月贡献热力图。克制、信息密度高。</div>
+    <div class="frame"><iframe src="c-minimal.html" scrolling="no" title="方案 C"></iframe></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span class="t">D · <b>离散杯格</b></span><a href="d-cups.html" target="_blank">打开 ↗</a></div>
+    <div class="desc">把“8 杯”直接画成 8 个可点的杯子，喝一杯亮一个，最直观。打卡型习惯则对应一个大圆。</div>
+    <div class="frame"><iframe src="d-cups.html" scrolling="no" title="方案 D"></iframe></div>
+  </div>
+</div>
+
+<p class="tip">提示：这些是静态设计稿（HTML），用来挑方向，不接真实数据。选定后我再把对应样式落到 <code>src/main.tsx</code> 的 HabitWorkspace 与 <code>src/styles.css</code> 里。</p>
+</body>
+</html>
