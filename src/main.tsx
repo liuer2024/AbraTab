@@ -3165,24 +3165,34 @@ function WeekLogWorkspace({
   function splitDays(body: string, labels: string[]): { found: boolean; contents: string[] } {
     const buffers: string[][] = labels.map(() => []);
     let current = -1;
+    let lastIdx = -1;
     let found = false;
     for (const line of body.split("\n")) {
       const idx = labels.indexOf(line.trim());
       if (idx >= 0) {
         current = idx;
+        lastIdx = idx;
         found = true;
         continue;
       }
       if (current >= 0) buffers[current].push(line);
     }
-    const contents = buffers.map((lines) => lines.join("\n").replace(/^\n+|\n+$/g, ""));
+    // Each day's content round-trips losslessly: drop only the single blank
+    // line joinDays inserts as a separator before the *next* day's label, so
+    // newlines the user typed (including trailing ones) survive editing. The
+    // last day has no following label, so its content is kept verbatim.
+    const contents = buffers.map((lines, i) => {
+      const out = lines.slice();
+      if (i !== lastIdx && out.length && out[out.length - 1] === "") out.pop();
+      return out.join("\n");
+    });
     return { found, contents };
   }
 
   // Reassemble per-day contents back into a single body.
   function joinDays(labels: string[], contents: string[]): string {
     return labels
-      .map((label, i) => (contents[i]?.trim() ? `${label}\n${contents[i]}` : label))
+      .map((label, i) => (contents[i] ? `${label}\n${contents[i]}` : label))
       .join("\n\n");
   }
 
