@@ -3884,17 +3884,18 @@ label,
 .habit-form-row {
   display: flex;
   gap: 10px;
-  margin-bottom: 12px;
 }
 
-.habit-emoji-input {
+/* Scoped under .habit-form-dialog so they beat `.prompt-dialog input`
+   (a more specific descendant selector that would otherwise force width:100%). */
+.habit-form-dialog .habit-emoji-input {
   width: 52px;
   flex: 0 0 auto;
   text-align: center;
   font-size: 18px;
 }
 
-.habit-name-input {
+.habit-form-dialog .habit-name-input {
   flex: 1;
   min-width: 0;
 }
@@ -3902,7 +3903,6 @@ label,
 .habit-kind-toggle {
   display: flex;
   gap: 10px;
-  margin-bottom: 12px;
 }
 
 .habit-kind-toggle button {
