@@ -3955,3 +3955,63 @@ label,
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ===== 体重 Weight ===== */
+.list-top-title{flex:1;font-size:13px;font-weight:600;color:var(--ink)}
+
+.snippet-item.weight-item{display:flex;flex-direction:row;align-items:center;gap:10px}
+.weight-item-main{min-width:0;flex:1;display:flex;align-items:center;gap:9px}
+.weight-item-day{font-size:13px;font-weight:500;color:var(--ink)}
+.weight-item-val{font-variant-numeric:tabular-nums;font-size:16px;font-weight:600;color:var(--ink)}
+.weight-item-val i{font-style:normal;font-size:11px;font-weight:400;color:var(--muted);margin-left:2px}
+
+.weight-delta{display:inline-flex;align-items:center;gap:2px;font-size:11px;
+  font-variant-numeric:tabular-nums;color:var(--muted)}
+.weight-delta.down{color:#2f8f5b}
+.weight-delta.up{color:#c0613a}
+.weight-delta.flat{color:var(--faint)}
+
+.unit-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel-2)}
+.unit-toggle button{width:34px;height:28px;border:0;background:transparent;color:var(--muted);
+  font-size:12px;cursor:pointer}
+.unit-toggle button.on{background:var(--accent);color:#fff}
+
+.editor-body.weight-body{padding:22px 24px;overflow-y:auto;gap:18px;align-items:stretch}
+.weight-body > *{width:100%;max-width:680px;margin:0 auto}
+
+.weight-entry-card{display:flex;align-items:flex-end;gap:12px;padding:16px;
+  border:1px solid var(--line);border-radius:12px;background:var(--panel-3)}
+.weight-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted)}
+.weight-field.date{flex:0 0 auto}
+.weight-field.val{flex:0 0 130px}
+.weight-field.note{flex:1;min-width:0}
+.weight-field input{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;
+  outline:0;color:var(--ink);background:var(--panel-2);font-size:13px}
+.weight-field input:focus{border-color:var(--accent-line)}
+.weight-field.val input{font-variant-numeric:tabular-nums;font-weight:600}
+.weight-save{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 16px;
+  border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#fff;
+  font-size:13px;font-weight:500;cursor:pointer}
+.weight-save:hover{filter:brightness(1.06)}
+
+.weight-stats{display:flex;gap:12px}
+.weight-stat{flex:1;display:flex;flex-direction:column;gap:4px;padding:12px 14px;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel-3)}
+.weight-stat .k{font-size:11px;color:var(--muted)}
+.weight-stat b{font-size:18px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:4px}
+.weight-stat b .weight-delta{font-size:16px}
+
+.weight-chart-card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel-2)}
+.weight-range{display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px}
+.weight-range button{height:26px;padding:0 12px;border:1px solid var(--line);border-radius:14px;
+  background:var(--panel-2);color:var(--muted);font-size:12px;cursor:pointer}
+.weight-range button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+.weight-chart{width:100%;height:auto;display:block}
+.wc-grid{stroke:var(--line);stroke-width:1}
+.wc-ylabel,.wc-xlabel{fill:var(--muted);font-size:10px;font-family:var(--font-ui)}
+.wc-line{stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.wc-dot{fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5}
+.wc-dot.last{fill:var(--accent)}
+.weight-chart-empty{padding:40px 0;text-align:center;color:var(--muted);font-size:13px}

@@ -40,10 +40,13 @@ import {
   Pin,
   Plus,
   RotateCcw,
+  Scale,
   Search,
   Settings,
   Star,
   Target,
+  TrendingDown,
+  TrendingUp,
   Upload,
   Tag,
   TerminalSquare,
@@ -177,7 +180,7 @@ type UploadResult = {
 };
 
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "track" | "habit" | "project" | "inbox" | "book";
+type JournalMode = "weeklog" | "track" | "habit" | "weight" | "project" | "inbox" | "book";
 
 type WeekLog = {
   id: string;
@@ -340,6 +343,15 @@ type HabitForm = {
   unit: string;
 };
 
+type WeightEntry = {
+  id: string;
+  day: string;
+  weight: number; // kg
+  note: string;
+  created_at: string;
+  updated_at: string;
+};
+
 const localeTags: Record<Locale, string> = { zh: "zh-CN" };
 
 const DEFAULT_WORKSPACE_KEY = "abratab.defaultWorkspace";
@@ -442,6 +454,28 @@ function readWeeklogTemplate(): WeeklogTemplate {
 function writeWeeklogTemplate(value: WeeklogTemplate) {
   try {
     localStorage.setItem(WEEKLOG_TEMPLATE_KEY, value);
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
+// Weight is stored in kg; the unit is a display preference (not synced).
+const WEIGHT_UNIT_KEY = "abratab.weightUnit";
+const LB_PER_KG = 2.2046226218;
+
+type WeightUnit = "kg" | "lb";
+
+function readWeightUnit(): WeightUnit {
+  try {
+    return localStorage.getItem(WEIGHT_UNIT_KEY) === "lb" ? "lb" : "kg";
+  } catch {
+    return "kg";
+  }
+}
+
+function writeWeightUnit(value: WeightUnit) {
+  try {
+    localStorage.setItem(WEIGHT_UNIT_KEY, value);
   } catch {
     /* localStorage unavailable; ignore */
   }
@@ -986,6 +1020,28 @@ const translations = {
     habitUnarchived: "已取消归档",
     habitNameRequired: "请先填写习惯名称",
     habitNoCheckins: "这个月还没有打卡记录。",
+    wsWeight: "体重",
+    weightUnitDay: "天",
+    weightToday: "今天",
+    weightDate: "日期",
+    weightValuePlaceholder: "体重",
+    weightNotePlaceholder: "备注（可选）",
+    weightSave: "保存",
+    weightSaved: "已记录体重",
+    weightDeleted: "已删除记录",
+    weightInvalid: "请输入有效的体重数值",
+    weightNewToday: "记今天",
+    weightCurrent: "当前",
+    weightVsLast: "较上次",
+    weightVsStart: "较起始",
+    weightRange: "区间",
+    weightLogged: "已记录",
+    weightNoData: "还没有体重记录，在上面记一条开始。",
+    weightNoChart: "至少记两天才能看到曲线。",
+    weightRange30: "近 30 天",
+    weightRange90: "近 90 天",
+    weightRangeAll: "全部",
+    weightLogTitle: "体重记录",
   },
 } as const;
 
@@ -1695,6 +1751,18 @@ function App() {
         />
       ) : workspace === "journal" && journalMode === "habit" ? (
         <HabitWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" && journalMode === "weight" ? (
+        <WeightWorkspace
           text={text}
           locale={locale}
           workspace={workspace}
@@ -2906,6 +2974,7 @@ function JournalModeNav({
     { id: "inbox", label: text.wsInbox, Icon: Inbox },
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
     { id: "habit", label: text.wsHabit, Icon: Target },
+    { id: "weight", label: text.wsWeight, Icon: Scale },
     { id: "track", label: text.wsTrack, Icon: Activity },
     { id: "project", label: text.wsProject, Icon: FolderGit2 },
     { id: "book", label: text.wsBook, Icon: BookOpen },
@@ -5384,6 +5453,422 @@ function BookWorkspace({
           <img src={lightbox} alt="" />
         </div>
       ) : null}
+    </>
+  );
+}
+
+// Hand-drawn SVG trend line for weight (no chart lib). `points` ascending by
+// day, values already in the display unit.
+function WeightChart({
+  points,
+  locale,
+}: {
+  points: Array<{ day: string; v: number }>;
+  locale: Locale;
+}) {
+  const W = 640, H = 200;
+  const padL = 40, padR = 14, padT = 14, padB = 26;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const vals = points.map((p) => p.v);
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const margin = (hi - lo) * 0.12 || 1;
+  lo -= margin;
+  hi += margin;
+
+  const x = (i: number) =>
+    points.length === 1 ? padL + innerW / 2 : padL + (i / (points.length - 1)) * innerW;
+  const y = (v: number) => padT + (1 - (v - lo) / (hi - lo)) * innerH;
+
+  const ticks = 4;
+  const gridY = Array.from({ length: ticks + 1 }, (_, i) => lo + (i / ticks) * (hi - lo));
+
+  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const baseY = (padT + innerH).toFixed(1);
+  const area = `${line} L${x(points.length - 1).toFixed(1)},${baseY} L${x(0).toFixed(1)},${baseY} Z`;
+
+  const fmtDay = (d: string) =>
+    new Intl.DateTimeFormat(localeTags[locale], { month: "numeric", day: "numeric" }).format(
+      new Date(`${d}T00:00:00`),
+    );
+  const xIdx =
+    points.length <= 1 ? [0] : [0, Math.floor((points.length - 1) / 2), points.length - 1];
+
+  return (
+    <svg className="weight-chart" viewBox={`0 0 ${W} ${H}`} role="img">
+      <defs>
+        <linearGradient id="wgrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {gridY.map((gv, i) => (
+        <g key={i}>
+          <line className="wc-grid" x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} />
+          <text className="wc-ylabel" x={padL - 7} y={y(gv) + 3} textAnchor="end">
+            {gv.toFixed(1)}
+          </text>
+        </g>
+      ))}
+      <path d={area} fill="url(#wgrad)" />
+      <path className="wc-line" d={line} fill="none" vectorEffect="non-scaling-stroke" />
+      {points.map((p, i) => (
+        <circle
+          key={i}
+          className={i === points.length - 1 ? "wc-dot last" : "wc-dot"}
+          cx={x(i)}
+          cy={y(p.v)}
+          r={i === points.length - 1 ? 4 : 2.4}
+        >
+          <title>{`${p.day} · ${p.v.toFixed(1)}`}</title>
+        </circle>
+      ))}
+      {xIdx.map((idx, k) => (
+        <text
+          key={k}
+          className="wc-xlabel"
+          x={x(idx)}
+          y={H - 8}
+          textAnchor={k === 0 ? "start" : k === xIdx.length - 1 ? "end" : "middle"}
+        >
+          {fmtDay(points[idx].day)}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+function WeightWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [entries, setEntries] = useState<WeightEntry[]>([]);
+  const [unit, setUnit] = useState<WeightUnit>(readWeightUnit);
+  const [range, setRange] = useState<"30" | "90" | "all">("30");
+  const [dateDraft, setDateDraft] = useState("");
+  const [weightDraft, setWeightDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+  const weightRef = useRef<HTMLInputElement | null>(null);
+
+  const intl = localeTags[locale];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const todayStr = ymd(new Date());
+
+  // kg (stored) ⇄ display unit
+  const disp = (kg: number) => (unit === "kg" ? kg : kg * LB_PER_KG);
+  const toKg = (v: number) => (unit === "kg" ? v : v / LB_PER_KG);
+  const fmt = (n: number) => n.toFixed(1);
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  const formatDay = (d: string) =>
+    new Intl.DateTimeFormat(intl, { month: "long", day: "numeric" }).format(new Date(`${d}T00:00:00`));
+
+  async function refresh() {
+    const rows = await invoke<WeightEntry[]>("list_weight_entries", {});
+    setEntries(rows);
+    return rows;
+  }
+
+  function fillFor(day: string, rows: WeightEntry[]) {
+    const entry = rows.find((r) => r.day === day);
+    if (entry) {
+      setWeightDraft(fmt(disp(entry.weight)));
+      setNoteDraft(entry.note);
+      setSelectedId(entry.id);
+    } else {
+      setWeightDraft("");
+      setNoteDraft("");
+      setSelectedId(null);
+    }
+  }
+
+  function selectDay(day: string, rows: WeightEntry[] = entries) {
+    setDateDraft(day);
+    fillFor(day, rows);
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await refresh();
+      selectDay(todayStr, rows);
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function changeUnit(next: WeightUnit) {
+    if (next === unit) return;
+    writeWeightUnit(next);
+    setUnit(next);
+    const entry = entries.find((r) => r.day === dateDraft);
+    if (entry) setWeightDraft((next === "kg" ? entry.weight : entry.weight * LB_PER_KG).toFixed(1));
+  }
+
+  async function save() {
+    const value = parseFloat(weightDraft);
+    if (!dateDraft || !Number.isFinite(value) || value <= 0) {
+      setStatus(text.weightInvalid);
+      return;
+    }
+    try {
+      const kg = Math.round(toKg(value) * 1000) / 1000;
+      await invoke("save_weight_entry", {
+        input: { day: dateDraft, weight: kg, note: noteDraft.trim() || null },
+      });
+      const rows = await refresh();
+      selectDay(dateDraft, rows);
+      setStatus(text.weightSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove(id: string) {
+    try {
+      await invoke("delete_weight_entry", { id });
+      const rows = await refresh();
+      selectDay(dateDraft, rows);
+      setStatus(text.weightDeleted);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  // Most-recent-first for the log; ascending `entries` drives the chart.
+  const recent = [...entries].reverse();
+  const cutoff = (() => {
+    if (range === "all") return "";
+    const d = new Date();
+    d.setDate(d.getDate() - (range === "30" ? 30 : 90) + 1);
+    return ymd(d);
+  })();
+  const ranged = range === "all" ? entries : entries.filter((e) => e.day >= cutoff);
+  const points = ranged.map((e) => ({ day: e.day, v: disp(e.weight) }));
+
+  const latest = entries[entries.length - 1] ?? null;
+  const prev = entries.length >= 2 ? entries[entries.length - 2] : null;
+  const deltaLast = latest && prev ? disp(latest.weight) - disp(prev.weight) : null;
+  const rangedVals = ranged.map((e) => disp(e.weight));
+  const rMin = rangedVals.length ? Math.min(...rangedVals) : null;
+  const rMax = rangedVals.length ? Math.max(...rangedVals) : null;
+
+  const Delta = ({ value }: { value: number }) => {
+    const cls = value < -0.05 ? "down" : value > 0.05 ? "up" : "flat";
+    const Icon = value < -0.05 ? TrendingDown : value > 0.05 ? TrendingUp : Minus;
+    return (
+      <span className={`weight-delta ${cls}`}>
+        <Icon size={12} />
+        {Math.abs(value).toFixed(1)}
+      </span>
+    );
+  };
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <Scale size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{entries.length} {text.weightUnitDay}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <JournalHeatmap locale={locale} />
+
+        <div className="nav-foot">
+          <button title={text.weightNewToday} onClick={() => selectDay(todayStr)}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsWeight}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <span className="list-top-title">{text.weightLogTitle}</span>
+          <button className="add-button" onClick={() => selectDay(todayStr)} title={text.weightNewToday}>
+            <Plus size={17} />
+          </button>
+        </div>
+        <div className="snippet-list">
+          {recent.map((entry, i) => {
+            const older = recent[i + 1];
+            const d = older ? disp(entry.weight) - disp(older.weight) : null;
+            return (
+              <div
+                key={entry.id}
+                className={`snippet-item weight-item ${entry.day === dateDraft ? "selected" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectDay(entry.day)}
+              >
+                <div className="weight-item-main">
+                  <span className="weight-item-day">{formatDay(entry.day)}</span>
+                  {d !== null ? <Delta value={d} /> : null}
+                </div>
+                <div className="weight-item-val">
+                  {fmt(disp(entry.weight))}<i>{unit}</i>
+                </div>
+              </div>
+            );
+          })}
+          {entries.length === 0 ? <div className="empty-list">{text.weightNoData}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <Scale size={11} />
+              {text.wsWeight}
+            </div>
+          </div>
+          <div className="editor-tools">
+            <div className="unit-toggle">
+              <button className={unit === "kg" ? "on" : ""} onClick={() => changeUnit("kg")}>kg</button>
+              <button className={unit === "lb" ? "on" : ""} onClick={() => changeUnit("lb")}>lb</button>
+            </div>
+            {selectedId ? (
+              <button className="icon-button" title={text.weightDeleted} onClick={() => void remove(selectedId)}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body weight-body">
+          <div className="weight-entry-card">
+            <label className="weight-field date">
+              <span>{text.weightDate}</span>
+              <input
+                type="date"
+                value={dateDraft}
+                max={todayStr}
+                onChange={(event) => selectDay(event.target.value)}
+              />
+            </label>
+            <label className="weight-field val">
+              <span>{text.wsWeight}（{unit}）</span>
+              <input
+                ref={weightRef}
+                type="number"
+                step="0.1"
+                min="0"
+                inputMode="decimal"
+                value={weightDraft}
+                onChange={(event) => setWeightDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void save();
+                  }
+                }}
+                placeholder={text.weightValuePlaceholder}
+              />
+            </label>
+            <label className="weight-field note">
+              <span>{text.weightNotePlaceholder}</span>
+              <input
+                value={noteDraft}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder={text.weightNotePlaceholder}
+              />
+            </label>
+            <button className="weight-save" onClick={() => void save()}>
+              <Check size={14} />
+              {text.weightSave}
+            </button>
+          </div>
+
+          <div className="weight-stats">
+            <div className="weight-stat">
+              <span className="k">{text.weightCurrent}</span>
+              <b>{latest ? `${fmt(disp(latest.weight))} ${unit}` : "—"}</b>
+            </div>
+            <div className="weight-stat">
+              <span className="k">{text.weightVsLast}</span>
+              <b>{deltaLast !== null ? <Delta value={deltaLast} /> : "—"}</b>
+            </div>
+            <div className="weight-stat">
+              <span className="k">{text.weightRange}</span>
+              <b>{rMin !== null ? `${fmt(rMin)}–${fmt(rMax as number)}` : "—"}</b>
+            </div>
+            <div className="weight-stat">
+              <span className="k">{text.weightLogged}</span>
+              <b>{entries.length} {text.weightUnitDay}</b>
+            </div>
+          </div>
+
+          <div className="weight-chart-card">
+            <div className="weight-range">
+              {(["30", "90", "all"] as const).map((r) => (
+                <button
+                  key={r}
+                  className={range === r ? "on" : ""}
+                  onClick={() => setRange(r)}
+                >
+                  {r === "30" ? text.weightRange30 : r === "90" ? text.weightRange90 : text.weightRangeAll}
+                </button>
+              ))}
+            </div>
+            {points.length >= 2 ? (
+              <WeightChart points={points} locale={locale} />
+            ) : (
+              <div className="weight-chart-empty">{text.weightNoChart}</div>
+            )}
+          </div>
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <Scale size={13} />
+            {text.wsWeight}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
     </>
   );
 }
