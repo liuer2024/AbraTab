@@ -14,9 +14,12 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  CircleCheck,
   Code2,
   Copy,
   Database,
+  Flame,
   Download,
   Eye,
   FilePlus2,
@@ -29,6 +32,7 @@ import {
   Inbox,
   Info,
   Lock,
+  Minus,
   Monitor,
   NotebookText,
   Palette,
@@ -39,10 +43,12 @@ import {
   Search,
   Settings,
   Star,
+  Target,
   Upload,
   Tag,
   TerminalSquare,
   Trash2,
+  Trophy,
   Type,
   X,
 } from "lucide-react";
@@ -171,7 +177,7 @@ type UploadResult = {
 };
 
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "track" | "project" | "inbox" | "book";
+type JournalMode = "weeklog" | "track" | "habit" | "project" | "inbox" | "book";
 
 type WeekLog = {
   id: string;
@@ -293,6 +299,45 @@ type TrackEntry = {
   track_id: string;
   body: string;
   created_at: string;
+};
+
+type HabitKind = "check" | "count";
+
+type Habit = {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+  kind: HabitKind;
+  target: number;
+  unit: string;
+  schedule: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  done_today: boolean;
+  today_count: number;
+  current_streak: number;
+  total_checkins: number;
+};
+
+type HabitCheckin = {
+  id: string;
+  habit_id: string;
+  day: string;
+  count: number;
+  note: string;
+  created_at: string;
+};
+
+type HabitForm = {
+  id?: string;
+  name: string;
+  emoji: string;
+  kind: HabitKind;
+  target: number;
+  unit: string;
 };
 
 const localeTags: Record<Locale, string> = { zh: "zh-CN" };
@@ -907,6 +952,40 @@ const translations = {
     inboxSaved: "已保存",
     inboxFormatText: "文本",
     inboxEmptyBody: "内容不能为空",
+    wsHabit: "习惯打卡",
+    habitUnit: "个习惯",
+    newHabit: "新建习惯",
+    editHabit: "编辑习惯",
+    searchHabits: "搜索习惯…",
+    noHabits: "还没有习惯，新建一个开始打卡。",
+    noArchivedHabits: "还没有归档的习惯。",
+    habitPickHint: "从左侧选择一个习惯查看打卡记录，或新建一个。",
+    habitNamePlaceholder: "习惯名称，如「喝水」「跑步」",
+    habitEmoji: "图标",
+    habitEmojiPlaceholder: "🙂",
+    habitKind: "类型",
+    habitKindCheck: "打卡",
+    habitKindCount: "计量",
+    habitKindCheckHint: "每天完成就打个卡",
+    habitKindCountHint: "每天累计到目标，如喝水 8 杯",
+    habitTarget: "每日目标",
+    habitUnitLabel: "单位",
+    habitUnitPlaceholder: "杯 / 公里 / 分钟",
+    habitStreak: "连续",
+    habitStreakUnit: "天",
+    habitDayUnit: "天",
+    habitTotal: "累计",
+    habitThisMonth: "本月",
+    habitDoneToday: "今天已完成",
+    habitMarkToday: "今日打卡",
+    habitSaved: "已保存习惯",
+    habitDeleted: "已删除习惯",
+    habitArchive: "归档",
+    habitUnarchive: "取消归档",
+    habitArchived: "已归档习惯",
+    habitUnarchived: "已取消归档",
+    habitNameRequired: "请先填写习惯名称",
+    habitNoCheckins: "这个月还没有打卡记录。",
   },
 } as const;
 
@@ -1604,6 +1683,18 @@ function App() {
         />
       ) : workspace === "journal" && journalMode === "book" ? (
         <BookWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" && journalMode === "habit" ? (
+        <HabitWorkspace
           text={text}
           locale={locale}
           workspace={workspace}
@@ -2814,6 +2905,7 @@ function JournalModeNav({
   const items: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
     { id: "inbox", label: text.wsInbox, Icon: Inbox },
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
+    { id: "habit", label: text.wsHabit, Icon: Target },
     { id: "track", label: text.wsTrack, Icon: Activity },
     { id: "project", label: text.wsProject, Icon: FolderGit2 },
     { id: "book", label: text.wsBook, Icon: BookOpen },
@@ -5291,6 +5383,636 @@ function BookWorkspace({
         <div className="lightbox" role="presentation" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="" />
         </div>
+      ) : null}
+    </>
+  );
+}
+
+// One-month grid for a single habit, marking the days it was completed.
+function HabitMonthGrid({
+  habit,
+  checkins,
+  locale,
+  text,
+}: {
+  habit: Habit;
+  checkins: HabitCheckin[];
+  locale: Locale;
+  text: Strings;
+}) {
+  const [offset, setOffset] = useState(0);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const ymd = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const target = Math.max(1, habit.target);
+
+  const counts: Record<string, number> = {};
+  for (const checkin of checkins) counts[checkin.day] = checkin.count;
+
+  const daysInMonth = last.getDate();
+  const leading = (first.getDay() + 6) % 7; // Monday-first column offset
+  const cells: Array<{ date: string; day: number; count: number } | null> = [];
+  for (let i = 0; i < leading; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${year}-${pad(month + 1)}-${pad(day)}`;
+    cells.push({ date, day, count: counts[date] ?? 0 });
+  }
+
+  const todayStr = ymd(now);
+  const monthCount = cells.filter((cell) => cell && cell.count >= target).length;
+  const monthLabel = new Intl.DateTimeFormat(localeTags[locale], {
+    year: "numeric",
+    month: "long",
+  }).format(base);
+  const weekdayFmt = new Intl.DateTimeFormat(localeTags[locale], { weekday: "narrow" });
+  const weekdays = Array.from({ length: 7 }, (_, i) => weekdayFmt.format(new Date(2024, 0, 1 + i)));
+  const level = (count: number) => (count <= 0 ? 0 : count >= target ? 4 : 2);
+
+  return (
+    <div className="habit-month">
+      <div className="heatmap-head">
+        <div className="heatmap-monthnav">
+          <button type="button" onClick={() => setOffset((value) => value - 1)} title="←">
+            <ChevronLeft size={13} />
+          </button>
+          <button type="button" className="heatmap-month" onClick={() => setOffset(0)}>
+            {monthLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffset((value) => value + 1)}
+            disabled={offset >= 0}
+            title="→"
+          >
+            <ChevronRight size={13} />
+          </button>
+        </div>
+        <span className="habit-month-count">
+          {text.habitThisMonth} {monthCount} {text.habitDayUnit}
+        </span>
+      </div>
+      <div className="heatmap-weekdays" aria-hidden="true">
+        {weekdays.map((label, index) => (
+          <span key={index}>{label}</span>
+        ))}
+      </div>
+      <div className="heatmap-grid">
+        {cells.map((cell, index) =>
+          cell ? (
+            <div
+              key={cell.date}
+              className={`heatmap-cell ${cell.date === todayStr ? "today" : ""}`}
+              data-level={level(cell.count)}
+              title={`${cell.date}${
+                habit.kind === "count" && cell.count > 0 ? ` · ${cell.count}${habit.unit}` : ""
+              }`}
+            >
+              {cell.day}
+            </div>
+          ) : (
+            <div key={`blank-${index}`} className="heatmap-cell empty" />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HabitWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checkins, setCheckins] = useState<HabitCheckin[]>([]);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [form, setForm] = useState<HabitForm | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; habit: Habit } | null>(null);
+
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+  const selected = habits.find((habit) => habit.id === selectedId) ?? null;
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  async function refreshHabits(nextQuery = query, archived = showArchived) {
+    const rows = await invoke<Habit[]>("list_habits", {
+      query: nextQuery.trim() || null,
+      archived,
+      today,
+    });
+    setHabits(rows);
+    return rows;
+  }
+
+  async function loadCheckins(habitId: string) {
+    const rows = await invoke<HabitCheckin[]>("list_habit_checkins", { habitId });
+    setCheckins(rows);
+  }
+
+  async function selectHabit(habit: Habit) {
+    setSelectedId(habit.id);
+    await loadCheckins(habit.id);
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await refreshHabits("");
+      if (rows.length) await selectHabit(rows[0]);
+    })().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Record today's count for a habit (0 clears it), then refresh list + detail.
+  async function applyCheckin(habit: Habit, count: number) {
+    try {
+      await invoke("set_habit_checkin", { habitId: habit.id, day: today, count, note: null });
+      await refreshHabits();
+      if (habit.id === selectedId) await loadCheckins(habit.id);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  const toggleCheck = (habit: Habit) => void applyCheckin(habit, habit.done_today ? 0 : 1);
+  const incCount = (habit: Habit) => void applyCheckin(habit, habit.today_count + 1);
+  const decCount = (habit: Habit) => void applyCheckin(habit, Math.max(0, habit.today_count - 1));
+
+  function openCreate() {
+    setContextMenu(null);
+    setForm({ name: "", emoji: "", kind: "check", target: 1, unit: "" });
+  }
+
+  function openEdit(habit: Habit) {
+    setContextMenu(null);
+    setForm({
+      id: habit.id,
+      name: habit.name,
+      emoji: habit.emoji,
+      kind: habit.kind,
+      target: habit.target || 1,
+      unit: habit.unit,
+    });
+  }
+
+  async function saveForm() {
+    if (!form) return;
+    if (!form.name.trim()) {
+      setStatus(text.habitNameRequired);
+      return;
+    }
+    try {
+      const input = {
+        id: form.id,
+        name: form.name.trim(),
+        emoji: form.emoji.trim(),
+        kind: form.kind,
+        target: form.kind === "count" ? Math.max(1, form.target || 1) : 1,
+        unit: form.kind === "count" ? form.unit.trim() : "",
+      };
+      const saved = await invoke<Habit>("save_habit", { input, today });
+      setForm(null);
+      const rows = await refreshHabits();
+      await selectHabit(rows.find((habit) => habit.id === saved.id) ?? saved);
+      setStatus(text.habitSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function deleteHabit() {
+    if (!selectedId) return;
+    try {
+      await invoke("delete_habit", { id: selectedId });
+      const rows = await refreshHabits();
+      setStatus(text.habitDeleted);
+      if (rows.length) {
+        await selectHabit(rows[0]);
+      } else {
+        setSelectedId(null);
+        setCheckins([]);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function archiveHabit(habit: Habit, archived: boolean) {
+    setContextMenu(null);
+    try {
+      await invoke("set_habit_archived", { id: habit.id, archived, today });
+      const rows = await refreshHabits();
+      setStatus(archived ? text.habitArchived : text.habitUnarchived);
+      if (habit.id === selectedId) {
+        if (rows.length) {
+          await selectHabit(rows[0]);
+        } else {
+          setSelectedId(null);
+          setCheckins([]);
+        }
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function toggleArchivedView() {
+    const next = !showArchived;
+    setShowArchived(next);
+    setContextMenu(null);
+    try {
+      const rows = await refreshHabits(query, next);
+      if (rows.length) {
+        await selectHabit(rows[0]);
+      } else {
+        setSelectedId(null);
+        setCheckins([]);
+      }
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <Target size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{habits.length} {text.habitUnit}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <JournalHeatmap locale={locale} />
+
+        <div className="nav-foot">
+          <button title={text.newHabit} onClick={openCreate}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsHabit}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <label className="search">
+            <Search size={14} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void refreshHabits(event.target.value).catch(showError);
+              }}
+              placeholder={text.searchHabits}
+            />
+          </label>
+          <button
+            className={`add-button ${showArchived ? "archived-on" : ""}`}
+            onClick={() => void toggleArchivedView()}
+            title={showArchived ? text.hideArchived : text.showArchived}
+          >
+            {showArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+          </button>
+          {!showArchived ? (
+            <button className="add-button" onClick={openCreate} title={text.newHabit}>
+              <Plus size={17} />
+            </button>
+          ) : null}
+        </div>
+
+        <div className="snippet-list">
+          {habits.map((habit) => (
+            <div
+              key={habit.id}
+              className={`snippet-item habit-item ${habit.id === selectedId ? "selected" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => void selectHabit(habit)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, habit });
+              }}
+            >
+              {habit.kind === "check" ? (
+                <button
+                  type="button"
+                  className={`habit-toggle ${habit.done_today ? "done" : ""}`}
+                  title={text.habitMarkToday}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleCheck(habit);
+                  }}
+                >
+                  {habit.done_today ? <CircleCheck size={22} /> : <Circle size={22} />}
+                </button>
+              ) : (
+                <span className={`habit-toggle status ${habit.done_today ? "done" : ""}`}>
+                  {habit.done_today ? <CircleCheck size={22} /> : <Circle size={22} />}
+                </span>
+              )}
+
+              <div className="habit-item-main">
+                <div className="habit-item-name">
+                  {habit.emoji ? <span className="habit-emoji">{habit.emoji}</span> : null}
+                  <span className="snippet-title">{habit.name}</span>
+                </div>
+                <div className="habit-item-meta">
+                  {habit.current_streak > 0 ? (
+                    <span className="habit-streak">
+                      <Flame size={11} />
+                      {habit.current_streak} {text.habitStreakUnit}
+                    </span>
+                  ) : null}
+                  {habit.kind === "count" ? (
+                    <span className="habit-progress-text">
+                      {habit.today_count}/{Math.max(1, habit.target)} {habit.unit}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              {habit.kind === "count" ? (
+                <div className="habit-count-controls" onClick={(event) => event.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={() => decCount(habit)}
+                    disabled={habit.today_count <= 0}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <button type="button" onClick={() => incCount(habit)}>
+                    <Plus size={14} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {habits.length === 0 ? (
+            <div className="empty-list">{showArchived ? text.noArchivedHabits : text.noHabits}</div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <Target size={11} />
+              {selected ? selected.name : text.wsHabit}
+            </div>
+          </div>
+          <div className="editor-tools">
+            {selected ? (
+              <>
+                <button type="button" className="snippet-save" onClick={openCreate}>
+                  <Plus size={14} />
+                  {text.newHabit}
+                </button>
+                <button className="icon-button" title={text.editHabit} onClick={() => openEdit(selected)}>
+                  <Pencil size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  title={selected.archived_at ? text.habitUnarchive : text.habitArchive}
+                  onClick={() => void archiveHabit(selected, !selected.archived_at)}
+                >
+                  {selected.archived_at ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                </button>
+                <button className="icon-button" title={text.delete} onClick={() => void deleteHabit()}>
+                  <Trash2 size={16} />
+                </button>
+              </>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body">
+          {selected ? (
+            <div className="habit-detail">
+              <div className="habit-detail-head">
+                <div className="habit-detail-title">
+                  {selected.emoji ? <span className="habit-emoji-lg">{selected.emoji}</span> : null}
+                  <span>{selected.name}</span>
+                </div>
+                {selected.kind === "check" ? (
+                  <button
+                    type="button"
+                    className={`habit-today-btn ${selected.done_today ? "done" : ""}`}
+                    onClick={() => toggleCheck(selected)}
+                  >
+                    {selected.done_today ? <CircleCheck size={16} /> : <Circle size={16} />}
+                    {selected.done_today ? text.habitDoneToday : text.habitMarkToday}
+                  </button>
+                ) : (
+                  <div className="habit-count-big">
+                    <button
+                      type="button"
+                      onClick={() => decCount(selected)}
+                      disabled={selected.today_count <= 0}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="habit-count-value">
+                      {selected.today_count}
+                      <i>/{Math.max(1, selected.target)} {selected.unit}</i>
+                    </span>
+                    <button type="button" onClick={() => incCount(selected)}>
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="habit-stats">
+                <div className="habit-stat">
+                  <Flame size={16} />
+                  <b>{selected.current_streak}</b>
+                  <span>{text.habitStreak}·{text.habitStreakUnit}</span>
+                </div>
+                <div className="habit-stat">
+                  <Trophy size={16} />
+                  <b>{selected.total_checkins}</b>
+                  <span>{text.habitTotal}·{text.habitDayUnit}</span>
+                </div>
+              </div>
+
+              <HabitMonthGrid habit={selected} checkins={checkins} locale={locale} text={text} />
+              {checkins.length === 0 ? <div className="empty-list">{text.habitNoCheckins}</div> : null}
+            </div>
+          ) : (
+            <div className="weeklog-empty-editor">{text.habitPickHint}</div>
+          )}
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <Target size={13} />
+            {text.wsHabit}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+
+      {form ? (
+        <div className="prompt-overlay" role="presentation" onMouseDown={() => setForm(null)}>
+          <form
+            className="prompt-dialog habit-form-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={form.id ? text.editHabit : text.newHabit}
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveForm();
+            }}
+          >
+            <h3>{form.id ? text.editHabit : text.newHabit}</h3>
+            <div className="habit-form-row">
+              <input
+                className="habit-emoji-input"
+                value={form.emoji}
+                maxLength={2}
+                onChange={(event) => setForm((f) => (f ? { ...f, emoji: event.target.value } : f))}
+                placeholder={text.habitEmojiPlaceholder}
+                aria-label={text.habitEmoji}
+              />
+              <input
+                autoFocus
+                className="habit-name-input"
+                value={form.name}
+                onChange={(event) => setForm((f) => (f ? { ...f, name: event.target.value } : f))}
+                placeholder={text.habitNamePlaceholder}
+              />
+            </div>
+            <div className="habit-kind-toggle">
+              <button
+                type="button"
+                className={form.kind === "check" ? "on" : ""}
+                onClick={() => setForm((f) => (f ? { ...f, kind: "check" } : f))}
+              >
+                <CircleCheck size={14} />
+                <b>{text.habitKindCheck}</b>
+                <i>{text.habitKindCheckHint}</i>
+              </button>
+              <button
+                type="button"
+                className={form.kind === "count" ? "on" : ""}
+                onClick={() => setForm((f) => (f ? { ...f, kind: "count" } : f))}
+              >
+                <Target size={14} />
+                <b>{text.habitKindCount}</b>
+                <i>{text.habitKindCountHint}</i>
+              </button>
+            </div>
+            {form.kind === "count" ? (
+              <div className="habit-form-row">
+                <label className="habit-field">
+                  <span>{text.habitTarget}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.target}
+                    onChange={(event) =>
+                      setForm((f) =>
+                        f ? { ...f, target: Math.max(1, Number(event.target.value) || 1) } : f,
+                      )
+                    }
+                  />
+                </label>
+                <label className="habit-field">
+                  <span>{text.habitUnitLabel}</span>
+                  <input
+                    value={form.unit}
+                    onChange={(event) => setForm((f) => (f ? { ...f, unit: event.target.value } : f))}
+                    placeholder={text.habitUnitPlaceholder}
+                  />
+                </label>
+              </div>
+            ) : null}
+            <div className="prompt-actions">
+              <button type="button" className="prompt-cancel" onClick={() => setForm(null)}>
+                {text.cancel}
+              </button>
+              <button type="submit" className="prompt-confirm">
+                {text.save}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {contextMenu ? (
+        <>
+          <div
+            className="context-backdrop"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div className="snippet-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            <button onClick={() => openEdit(contextMenu.habit)}>
+              <Pencil size={13} />
+              {text.editHabit}
+            </button>
+            {contextMenu.habit.archived_at ? (
+              <button onClick={() => void archiveHabit(contextMenu.habit, false)}>
+                <ArchiveRestore size={13} />
+                {text.habitUnarchive}
+              </button>
+            ) : (
+              <button onClick={() => void archiveHabit(contextMenu.habit, true)}>
+                <Archive size={13} />
+                {text.habitArchive}
+              </button>
+            )}
+          </div>
+        </>
       ) : null}
     </>
   );
