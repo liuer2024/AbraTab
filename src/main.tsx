@@ -3689,6 +3689,12 @@ function WeekLogWorkspace({
                           rows={Math.max(2, (dayParsed.contents[blockIndex] ?? "").split("\n").length)}
                           onChange={(event) => setDayContentAt(blockIndex, event.target.value)}
                           onPaste={(event) => void handleBlockPaste(event, blockIndex)}
+                          onKeyDown={(event) => {
+                            if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+                              event.preventDefault();
+                              void save();
+                            }
+                          }}
                           placeholder={text.weeklogDayPlaceholder}
                           spellCheck={false}
                         />
