@@ -39,6 +39,7 @@ import {
   Pencil,
   Pin,
   Plus,
+  Quote as QuoteIcon,
   RotateCcw,
   Scale,
   Search,
@@ -180,7 +181,7 @@ type UploadResult = {
 };
 
 type Workspace = "snippets" | "journal";
-type JournalMode = "weeklog" | "track" | "habit" | "weight" | "project" | "inbox" | "book";
+type JournalMode = "weeklog" | "track" | "habit" | "weight" | "project" | "inbox" | "book" | "quote";
 
 type WeekLog = {
   id: string;
@@ -348,6 +349,18 @@ type WeightEntry = {
   day: string;
   weight: number; // kg
   note: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type Quote = {
+  id: string;
+  text: string;
+  author: string;
+  source: string;
+  tags: string[];
+  note: string;
+  favorite: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1042,6 +1055,27 @@ const translations = {
     weightRange90: "近 90 天",
     weightRangeAll: "全部",
     weightLogTitle: "体重记录",
+    wsQuote: "摘抄",
+    quoteListTitle: "摘抄",
+    quoteNew: "新摘抄",
+    quoteSearchPlaceholder: "搜索摘抄、作者、出处…",
+    quoteTextPlaceholder: "记下打动你的一句话…",
+    quoteAuthorPlaceholder: "作者 / 说话人",
+    quoteSourcePlaceholder: "出处：书名 / 电影 / 链接",
+    quoteTagsPlaceholder: "标签，用逗号分隔",
+    quoteNotePlaceholder: "我的感想（可选）",
+    quoteAuthorLabel: "作者",
+    quoteSourceLabel: "出处",
+    quoteTagsLabel: "标签",
+    quoteNoteLabel: "感想",
+    quoteSave: "保存",
+    quoteSaved: "已保存摘抄",
+    quoteDeleted: "已删除摘抄",
+    quoteEmpty: "先写点什么再保存",
+    quoteNoData: "还没有摘抄，点右上角 + 记一条。",
+    quoteFavorite: "收藏",
+    quoteCount: "条摘抄",
+    quoteAnon: "佚名",
   },
 } as const;
 
@@ -1763,6 +1797,18 @@ function App() {
         />
       ) : workspace === "journal" && journalMode === "weight" ? (
         <WeightWorkspace
+          text={text}
+          locale={locale}
+          workspace={workspace}
+          setWorkspace={setWorkspace}
+          mode={journalMode}
+          setMode={setJournalMode}
+          onOpenSettings={() => setSettingsOpen(true)}
+          startWindowDrag={startWindowDrag}
+          dbPath={dbPath}
+        />
+      ) : workspace === "journal" && journalMode === "quote" ? (
+        <QuoteWorkspace
           text={text}
           locale={locale}
           workspace={workspace}
@@ -2978,6 +3024,7 @@ function JournalModeNav({
     { id: "track", label: text.wsTrack, Icon: Activity },
     { id: "project", label: text.wsProject, Icon: FolderGit2 },
     { id: "book", label: text.wsBook, Icon: BookOpen },
+    { id: "quote", label: text.wsQuote, Icon: QuoteIcon },
   ];
   return (
     <>
@@ -5867,6 +5914,308 @@ function WeightWorkspace({
           <span>
             <Scale size={13} />
             {text.wsWeight}
+          </span>
+          <span className="db">
+            <Database size={13} />
+            {dbPath}
+          </span>
+          <span className="status">{status ? <Check size={13} /> : null}{status}</span>
+        </footer>
+      </section>
+    </>
+  );
+}
+
+function QuoteWorkspace({
+  text,
+  locale,
+  workspace,
+  setWorkspace,
+  mode,
+  setMode,
+  onOpenSettings,
+  startWindowDrag,
+  dbPath,
+}: {
+  text: Strings;
+  locale: Locale;
+  workspace: Workspace;
+  setWorkspace: (value: Workspace) => void;
+  mode: JournalMode;
+  setMode: (value: JournalMode) => void;
+  onOpenSettings: () => void;
+  startWindowDrag: (event: React.MouseEvent<HTMLElement>) => void;
+  dbPath: string;
+}) {
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [textDraft, setTextDraft] = useState("");
+  const [authorDraft, setAuthorDraft] = useState("");
+  const [sourceDraft, setSourceDraft] = useState("");
+  const [tagsDraft, setTagsDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [favoriteDraft, setFavoriteDraft] = useState(false);
+  const [status, setStatus] = useState("");
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const intl = localeTags[locale];
+  const formatDate = (value: string) =>
+    value
+      ? new Intl.DateTimeFormat(intl, { month: "long", day: "numeric" }).format(new Date(value))
+      : "";
+
+  function showError(error: unknown) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+
+  async function refresh() {
+    const rows = await invoke<Quote[]>("list_quotes", {});
+    setQuotes(rows);
+    return rows;
+  }
+
+  useEffect(() => {
+    void refresh().catch(showError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function resetDraft() {
+    setSelectedId(null);
+    setTextDraft("");
+    setAuthorDraft("");
+    setSourceDraft("");
+    setTagsDraft("");
+    setNoteDraft("");
+    setFavoriteDraft(false);
+  }
+
+  function startNew() {
+    resetDraft();
+    setStatus("");
+    window.setTimeout(() => textRef.current?.focus(), 0);
+  }
+
+  function select(quote: Quote) {
+    setSelectedId(quote.id);
+    setTextDraft(quote.text);
+    setAuthorDraft(quote.author);
+    setSourceDraft(quote.source);
+    setTagsDraft(quote.tags.join(", "));
+    setNoteDraft(quote.note);
+    setFavoriteDraft(quote.favorite);
+    setStatus("");
+  }
+
+  async function save() {
+    const body = textDraft.trim();
+    if (!body) {
+      setStatus(text.quoteEmpty);
+      textRef.current?.focus();
+      return;
+    }
+    const tags = tagsDraft
+      .split(/[,，]/)
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    try {
+      const saved = await invoke<Quote>("save_quote", {
+        input: {
+          id: selectedId,
+          text: body,
+          author: authorDraft.trim(),
+          source: sourceDraft.trim(),
+          tags,
+          note: noteDraft.trim(),
+          favorite: favoriteDraft,
+        },
+      });
+      await refresh();
+      select(saved);
+      setStatus(text.quoteSaved);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function remove(id: string) {
+    try {
+      await invoke("delete_quote", { id });
+      await refresh();
+      resetDraft();
+      setStatus(text.quoteDeleted);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? quotes.filter((quote) =>
+        `${quote.text} ${quote.author} ${quote.source} ${quote.tags.join(" ")} ${quote.note}`
+          .toLowerCase()
+          .includes(q),
+      )
+    : quotes;
+
+  return (
+    <>
+      <nav className="nav-panel">
+        <div className="brand" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="brand-logo">
+            <QuoteIcon size={20} />
+          </div>
+          <div data-tauri-drag-region>
+            <h1>{text.appName}</h1>
+            <p>{quotes.length} {text.quoteCount}</p>
+          </div>
+        </div>
+
+        <WorkspaceToggle workspace={workspace} setWorkspace={setWorkspace} text={text} />
+
+        <div className="nav-scroll">
+          <JournalModeNav mode={mode} setMode={setMode} text={text} />
+        </div>
+
+        <JournalHeatmap locale={locale} />
+
+        <div className="nav-foot">
+          <button title={text.quoteNew} onClick={startNew}>
+            <Plus size={15} />
+          </button>
+          <span>{text.wsQuote}</span>
+          <button title={text.settings} onClick={onOpenSettings}>
+            <Settings size={15} />
+          </button>
+        </div>
+      </nav>
+
+      <section className="list-panel">
+        <div className="list-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <span className="list-top-title">{text.quoteListTitle}</span>
+          <button className="add-button" onClick={startNew} title={text.quoteNew}>
+            <Plus size={17} />
+          </button>
+        </div>
+        <div className="quote-search">
+          <Search size={14} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={text.quoteSearchPlaceholder}
+          />
+        </div>
+        <div className="snippet-list">
+          {filtered.map((quote) => (
+            <div
+              key={quote.id}
+              className={`snippet-item quote-item ${quote.id === selectedId ? "selected" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => select(quote)}
+            >
+              <p className="quote-item-text">{quote.text}</p>
+              <div className="quote-item-meta">
+                {quote.favorite ? <Star size={11} className="quote-item-star" /> : null}
+                <span className="quote-item-src">
+                  {quote.author || quote.source
+                    ? [quote.author, quote.source].filter(Boolean).join(" · ")
+                    : formatDate(quote.created_at)}
+                </span>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 ? <div className="empty-list">{text.quoteNoData}</div> : null}
+        </div>
+      </section>
+
+      <section className="editor-panel">
+        <header className="editor-top" data-tauri-drag-region onMouseDown={startWindowDrag}>
+          <div className="editor-title" data-tauri-drag-region onMouseDown={startWindowDrag}>
+            <div className="crumb" data-tauri-drag-region onMouseDown={startWindowDrag}>
+              <QuoteIcon size={11} />
+              {text.wsQuote}
+            </div>
+          </div>
+          <div className="editor-tools">
+            <button
+              className={`icon-button ${favoriteDraft ? "on" : ""}`}
+              title={text.quoteFavorite}
+              onClick={() => setFavoriteDraft((value) => !value)}
+            >
+              <Star size={16} fill={favoriteDraft ? "currentColor" : "none"} />
+            </button>
+            {selectedId ? (
+              <button className="icon-button" title={text.quoteDeleted} onClick={() => void remove(selectedId)}>
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="editor-body quote-body">
+          <div className="quote-form">
+            <textarea
+              ref={textRef}
+              className="quote-text"
+              value={textDraft}
+              onChange={(event) => setTextDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  void save();
+                }
+              }}
+              placeholder={text.quoteTextPlaceholder}
+              spellCheck={false}
+            />
+            <div className="quote-row">
+              <label className="quote-field">
+                <span>{text.quoteAuthorLabel}</span>
+                <input
+                  value={authorDraft}
+                  onChange={(event) => setAuthorDraft(event.target.value)}
+                  placeholder={text.quoteAuthorPlaceholder}
+                />
+              </label>
+              <label className="quote-field">
+                <span>{text.quoteSourceLabel}</span>
+                <input
+                  value={sourceDraft}
+                  onChange={(event) => setSourceDraft(event.target.value)}
+                  placeholder={text.quoteSourcePlaceholder}
+                />
+              </label>
+            </div>
+            <label className="quote-field">
+              <span>{text.quoteTagsLabel}</span>
+              <input
+                value={tagsDraft}
+                onChange={(event) => setTagsDraft(event.target.value)}
+                placeholder={text.quoteTagsPlaceholder}
+              />
+            </label>
+            <label className="quote-field">
+              <span>{text.quoteNoteLabel}</span>
+              <textarea
+                className="quote-note"
+                value={noteDraft}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder={text.quoteNotePlaceholder}
+                spellCheck={false}
+              />
+            </label>
+            <button className="quote-save" onClick={() => void save()}>
+              <Check size={14} />
+              {text.quoteSave}
+            </button>
+          </div>
+        </div>
+
+        <footer className="status-bar">
+          <span>
+            <QuoteIcon size={13} />
+            {text.wsQuote}
           </span>
           <span className="db">
             <Database size={13} />

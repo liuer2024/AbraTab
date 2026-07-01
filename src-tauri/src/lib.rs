@@ -7,8 +7,8 @@ use gitee_sync::{GiteePullResult, GiteePushResult, GiteeSyncConfigInput, GiteeSy
 use qiniu::{QiniuStatus, UploadResult};
 use models::{
     Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
-    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput, WeightEntry, WeightEntryInput,
+    InboxItem, Project, ProjectInput, Quote, QuoteInput, Snippet, SnippetInput, Track, TrackEntry,
+    TrackEntryInput, TrackInput, WeekLog, WeekLogInput, WeightEntry, WeightEntryInput,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -561,6 +561,22 @@ fn delete_weight_entry(id: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn list_quotes(query: Option<String>) -> Result<Vec<Quote>, AppError> {
+    Ok(Store::open_default()?.list_quotes(query.as_deref())?)
+}
+
+#[tauri::command]
+fn save_quote(input: QuoteInput) -> Result<Quote, AppError> {
+    Ok(Store::open_default()?.save_quote(input)?)
+}
+
+#[tauri::command]
+fn delete_quote(id: String) -> Result<(), AppError> {
+    Store::open_default()?.delete_quote(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn gitee_sync_status() -> Result<GiteeSyncStatus, AppError> {
     Ok(gitee_sync::load_status()?)
 }
@@ -988,6 +1004,9 @@ pub fn run() {
             list_weight_entries,
             save_weight_entry,
             delete_weight_entry,
+            list_quotes,
+            save_quote,
+            delete_quote,
             gitee_sync_status,
             save_gitee_sync_config,
             push_gitee_sync,

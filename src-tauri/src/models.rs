@@ -270,3 +270,33 @@ pub struct WeightEntryInput {
     pub weight: f64,
     pub note: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Quote {
+    pub id: String,
+    pub text: String, // 摘抄正文
+    #[serde(default)]
+    pub author: String, // 作者 / 说话人
+    #[serde(default)]
+    pub source: String, // 出处：书名 / 电影 / 链接
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub note: String, // 自己的感想
+    #[serde(default)]
+    pub favorite: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct QuoteInput {
+    pub id: Option<String>,
+    pub text: String,
+    pub author: Option<String>,
+    pub source: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub note: Option<String>,
+    pub favorite: Option<bool>,
+}

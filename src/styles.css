@@ -4015,3 +4015,36 @@ label,
 .wc-dot{fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5}
 .wc-dot.last{fill:var(--accent)}
 .weight-chart-empty{padding:40px 0;text-align:center;color:var(--muted);font-size:13px}
+
+/* ===== 摘抄 Quote ===== */
+.quote-search{display:flex;align-items:center;gap:8px;margin:8px 12px 4px;padding:0 10px;height:32px;
+  border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--muted)}
+.quote-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;
+  color:var(--ink);font-size:13px}
+
+.snippet-item.quote-item{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.quote-item-text{margin:0;font-size:13px;line-height:1.5;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.quote-item-meta{display:flex;align-items:center;gap:5px;min-width:0}
+.quote-item-star{color:var(--accent);flex:0 0 auto}
+.quote-item-src{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.editor-body.quote-body{padding:22px 24px;overflow-y:auto;align-items:stretch}
+.quote-form{display:flex;flex-direction:column;gap:14px;width:100%;max-width:680px;margin:0 auto}
+.quote-text{min-height:150px;resize:vertical;padding:14px 16px;border:1px solid var(--line);border-radius:12px;
+  outline:0;background:var(--panel-3);color:var(--ink);font-size:16px;line-height:1.7;
+  font-family:var(--font-ui)}
+.quote-text:focus{border-color:var(--accent-line)}
+.quote-row{display:flex;gap:12px}
+.quote-row .quote-field{flex:1;min-width:0}
+.quote-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted)}
+.quote-field input,.quote-note{padding:0 10px;border:1px solid var(--line);border-radius:8px;outline:0;
+  color:var(--ink);background:var(--panel-2);font-size:13px;font-family:var(--font-ui)}
+.quote-field input{height:34px}
+.quote-note{min-height:60px;resize:vertical;padding:8px 10px;line-height:1.6}
+.quote-field input:focus,.quote-note:focus{border-color:var(--accent-line)}
+.quote-save{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 18px;
+  border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#fff;
+  font-size:13px;font-weight:500;cursor:pointer}
+.quote-save:hover{filter:brightness(1.06)}
+.editor-tools .icon-button.on{color:var(--accent)}

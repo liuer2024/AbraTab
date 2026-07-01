@@ -1,7 +1,7 @@
 use crate::models::{
     Book, BookExcerpt, BookExcerptInput, BookInput, DayActivity, Habit, HabitCheckin, HabitInput,
-    InboxItem, Project, ProjectInput, Snippet, SnippetInput, Track, TrackEntry, TrackEntryInput,
-    TrackInput, WeekLog, WeekLogInput, WeightEntry,
+    InboxItem, Project, ProjectInput, Quote, QuoteInput, Snippet, SnippetInput, Track, TrackEntry,
+    TrackEntryInput, TrackInput, WeekLog, WeekLogInput, WeightEntry,
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1227,6 +1227,147 @@ impl Store {
         Ok(())
     }
 
+    // ----- Quotes (摘抄) -----
+
+    /// All quotes, newest first. Optional full-text-ish search over the body,
+    /// author, source and tags.
+    #[allow(dead_code)]
+    pub fn list_quotes(&self, query: Option<&str>) -> Result<Vec<Quote>> {
+        let quotes = if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+            let pattern = format!("%{}%", query.trim().to_lowercase());
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, text, author, source, tags, note, favorite, created_at, updated_at
+                FROM quotes
+                WHERE lower(text) LIKE ?1
+                   OR lower(author) LIKE ?1
+                   OR lower(source) LIKE ?1
+                   OR lower(tags) LIKE ?1
+                ORDER BY created_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map(params![pattern], row_to_quote)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        } else {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, text, author, source, tags, note, favorite, created_at, updated_at
+                FROM quotes
+                ORDER BY created_at DESC
+                "#,
+            )?;
+            let rows = stmt
+                .query_map([], row_to_quote)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        Ok(quotes)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_quote(&self, id: &str) -> Result<Option<Quote>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, text, author, source, tags, note, favorite, created_at, updated_at
+                FROM quotes
+                WHERE id = ?1
+                "#,
+                params![id],
+                row_to_quote,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    pub fn save_quote(&self, input: QuoteInput) -> Result<Quote> {
+        let now = now_string();
+        let id = input
+            .id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(new_quote_id);
+        let existing = self.get_quote(&id)?;
+        let created_at = existing
+            .as_ref()
+            .map(|quote| quote.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let favorite = input
+            .favorite
+            .or_else(|| existing.as_ref().map(|quote| quote.favorite))
+            .unwrap_or(false);
+        let tags = serde_json::to_string(&input.tags.unwrap_or_default())?;
+
+        self.conn.execute(
+            r#"
+            INSERT INTO quotes (id, text, author, source, tags, note, favorite, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                text = excluded.text,
+                author = excluded.author,
+                source = excluded.source,
+                tags = excluded.tags,
+                note = excluded.note,
+                favorite = excluded.favorite,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                id,
+                input.text,
+                input.author.unwrap_or_default(),
+                input.source.unwrap_or_default(),
+                tags,
+                input.note.unwrap_or_default(),
+                favorite,
+                created_at,
+                now,
+            ],
+        )?;
+
+        self.get_quote(&id)?.context("quote was not saved")
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_quote(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM quotes WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn upsert_snapshot_quote(&self, quote: &Quote) -> Result<()> {
+        let tags = serde_json::to_string(&quote.tags)?;
+        self.conn.execute(
+            r#"
+            INSERT INTO quotes (id, text, author, source, tags, note, favorite, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                text = excluded.text,
+                author = excluded.author,
+                source = excluded.source,
+                tags = excluded.tags,
+                note = excluded.note,
+                favorite = excluded.favorite,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                quote.id,
+                quote.text,
+                quote.author,
+                quote.source,
+                tags,
+                quote.note,
+                quote.favorite,
+                quote.created_at,
+                quote.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     // ----- Habits (习惯打卡) -----
 
     const HABIT_COLS: &'static str = r#"
@@ -1595,7 +1736,7 @@ impl Store {
 
     pub fn export_snapshot(&self) -> Result<SyncSnapshot> {
         Ok(SyncSnapshot {
-            schema: 8,
+            schema: 9,
             client: "AbraTab".to_string(),
             exported_at: now_string(),
             snippets: self.list(None, true)?,
@@ -1609,12 +1750,13 @@ impl Store {
             habits: self.list_all_habits()?,
             habit_checkins: self.list_all_habit_checkins()?,
             weight_entries: self.list_weight_entries(None, None)?,
+            quotes: self.list_quotes(None)?,
         })
     }
 
     #[allow(dead_code)]
     pub fn import_snapshot(&self, snapshot: SyncSnapshot) -> Result<SyncImportResult> {
-        if snapshot.schema == 0 || snapshot.schema > 8 {
+        if snapshot.schema == 0 || snapshot.schema > 9 {
             anyhow::bail!("unsupported sync schema {}", snapshot.schema);
         }
 
@@ -1757,6 +1899,21 @@ impl Store {
                 }
                 None => {
                     self.upsert_snapshot_weight_entry(&entry)?;
+                    result.inserted += 1;
+                }
+            }
+        }
+        for quote in snapshot.quotes {
+            match self.get_quote(&quote.id)? {
+                Some(existing) if existing.updated_at >= quote.updated_at => {
+                    result.skipped += 1;
+                }
+                Some(_) => {
+                    self.upsert_snapshot_quote(&quote)?;
+                    result.updated += 1;
+                }
+                None => {
+                    self.upsert_snapshot_quote(&quote)?;
                     result.inserted += 1;
                 }
             }
@@ -1993,6 +2150,20 @@ impl Store {
             );
 
             CREATE INDEX IF NOT EXISTS weight_entries_day_idx ON weight_entries(day);
+
+            CREATE TABLE IF NOT EXISTS quotes (
+                id TEXT PRIMARY KEY NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                author TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                note TEXT NOT NULL DEFAULT '',
+                favorite INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS quotes_created_idx ON quotes(created_at);
             "#,
         )?;
         self.add_column_if_missing("snippets", "favorite", "INTEGER NOT NULL DEFAULT 0")?;
@@ -2192,6 +2363,28 @@ fn row_to_weight_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<WeightEntry>
         note: row.get(3)?,
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
+    })
+}
+
+#[allow(dead_code)]
+fn new_quote_id() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    format!("qt_{nanos:x}")
+}
+
+fn row_to_quote(row: &rusqlite::Row<'_>) -> rusqlite::Result<Quote> {
+    let tags_json: String = row.get(4)?;
+    let tags = serde_json::from_str(&tags_json).unwrap_or_default();
+    Ok(Quote {
+        id: row.get(0)?,
+        text: row.get(1)?,
+        author: row.get(2)?,
+        source: row.get(3)?,
+        tags,
+        note: row.get(5)?,
+        favorite: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -2438,6 +2631,8 @@ pub struct SyncSnapshot {
     pub habit_checkins: Vec<HabitCheckin>,
     #[serde(default)]
     pub weight_entries: Vec<WeightEntry>,
+    #[serde(default)]
+    pub quotes: Vec<Quote>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
