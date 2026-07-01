@@ -1,6 +1,6 @@
 [package]
 name = "abratab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Terminal snippet manager"
 authors = ["AbraTab"]
 edition = "2021"
