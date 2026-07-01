@@ -494,6 +494,44 @@ function writeWeightUnit(value: WeightUnit) {
   }
 }
 
+// Which journal modules appear in the sidebar, in nav order.
+const ALL_JOURNAL_MODES: JournalMode[] = [
+  "inbox",
+  "weeklog",
+  "habit",
+  "weight",
+  "track",
+  "project",
+  "book",
+  "quote",
+];
+
+// Stored as the *hidden* set so any module added later shows by default.
+const HIDDEN_MODES_KEY = "abratab.hiddenJournalModes";
+
+function readHiddenJournalModes(): JournalMode[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_MODES_KEY);
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value): value is JournalMode =>
+        (ALL_JOURNAL_MODES as string[]).includes(value),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function writeHiddenJournalModes(value: JournalMode[]) {
+  try {
+    localStorage.setItem(HIDDEN_MODES_KEY, value.join(","));
+  } catch {
+    /* localStorage unavailable; ignore */
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -820,6 +858,8 @@ const translations = {
     newWeeklog: "新建周记",
     weeklogTemplate: "新建周记默认模板",
     weeklogTemplateDetail: "新建周记时预填的内容",
+    menuVisibility: "菜单显示",
+    menuVisibilityDetail: "选择「札记」侧边栏里显示哪些模块",
     weeklogTemplateBlank: "空白",
     weeklogTemplatePaged: "翻页",
     weeklogTemplateBlocks: "多块",
@@ -1086,6 +1126,7 @@ function App() {
   const [activeView, setActiveView] = useState<LibraryView>("all");
   const [defaultWorkspace, setDefaultWorkspace] = useState<Workspace>(readDefaultWorkspace);
   const [weeklogTemplate, setWeeklogTemplate] = useState<WeeklogTemplate>(readWeeklogTemplate);
+  const [hiddenModes, setHiddenModes] = useState<JournalMode[]>(readHiddenJournalModes);
   const [workspace, setWorkspace] = useState<Workspace>(readDefaultWorkspace);
   const [journalMode, setJournalMode] = useState<JournalMode>("weeklog");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -2277,6 +2318,37 @@ function App() {
                       </button>
                     </div>
                   </SettingRow>
+                  <SettingRow title={text.menuVisibility} detail={text.menuVisibilityDetail}>
+                    <div className="menu-toggles">
+                      {ALL_JOURNAL_MODES.map((id) => {
+                        const on = !hiddenModes.includes(id);
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className={on ? "on" : ""}
+                            onClick={() => {
+                              const next = on
+                                ? [...hiddenModes, id]
+                                : hiddenModes.filter((m) => m !== id);
+                              if (next.length >= ALL_JOURNAL_MODES.length) return; // 至少留一个
+                              writeHiddenJournalModes(next);
+                              setHiddenModes(next);
+                              if (on && journalMode === id) {
+                                const firstVisible = ALL_JOURNAL_MODES.find(
+                                  (m) => !next.includes(m),
+                                );
+                                if (firstVisible) setJournalMode(firstVisible);
+                              }
+                            }}
+                          >
+                            {on ? <Check size={13} /> : null}
+                            {journalModeLabel(id, text)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </SettingRow>
                 </div>
               ) : null}
 
@@ -3007,6 +3079,27 @@ function DatePicker({
   );
 }
 
+function journalModeLabel(mode: JournalMode, text: Strings): string {
+  switch (mode) {
+    case "inbox":
+      return text.wsInbox;
+    case "weeklog":
+      return text.wsWeeklog;
+    case "habit":
+      return text.wsHabit;
+    case "weight":
+      return text.wsWeight;
+    case "track":
+      return text.wsTrack;
+    case "project":
+      return text.wsProject;
+    case "book":
+      return text.wsBook;
+    case "quote":
+      return text.wsQuote;
+  }
+}
+
 function JournalModeNav({
   mode,
   setMode,
@@ -3016,7 +3109,8 @@ function JournalModeNav({
   setMode: (value: JournalMode) => void;
   text: Strings;
 }) {
-  const items: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
+  const hidden = readHiddenJournalModes();
+  const allItems: Array<{ id: JournalMode; label: string; Icon: React.ElementType }> = [
     { id: "inbox", label: text.wsInbox, Icon: Inbox },
     { id: "weeklog", label: text.wsWeeklog, Icon: CalendarDays },
     { id: "habit", label: text.wsHabit, Icon: Target },
@@ -3026,6 +3120,7 @@ function JournalModeNav({
     { id: "book", label: text.wsBook, Icon: BookOpen },
     { id: "quote", label: text.wsQuote, Icon: QuoteIcon },
   ];
+  const items = allItems.filter(({ id }) => !hidden.includes(id));
   return (
     <>
       {items.map(({ id, label, Icon }) => (

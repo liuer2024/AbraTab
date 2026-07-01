@@ -4048,3 +4048,11 @@ label,
   font-size:13px;font-weight:500;cursor:pointer}
 .quote-save:hover{filter:brightness(1.06)}
 .editor-tools .icon-button.on{color:var(--accent)}
+
+/* 菜单显示 toggle chips */
+.menu-toggles{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end;max-width:320px}
+.menu-toggles button{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 11px;
+  border:1px solid var(--line);border-radius:14px;background:var(--panel-2);color:var(--muted);
+  font-size:12px;cursor:pointer}
+.menu-toggles button:hover{border-color:var(--accent-line)}
+.menu-toggles button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
